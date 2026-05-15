@@ -374,6 +374,37 @@ Reads the value of a single named attribute on a USD prim. Stage is opened with 
 
 ---
 
+#### `usd_replace_anchors`
+
+Replaces multiple anchor asset paths (sublayers, references, payloads) in a single USD layer file in one operation. **Edits the file in-place.** Use `usd_read_composition_arcs` first to inspect existing anchor strings.
+
+The `replacements` map is applied as-is — the tool performs a pure string substitution. Whether the new paths are absolute or relative (and relative to what) is entirely up to the caller.
+
+**Input**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Absolute path to a USD file to modify |
+| `replacements` | object | `{old_asset_path: new_asset_path}`. Keys must match the exact strings stored in the file (as returned by `usd_read_composition_arcs`) |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/path/to/shot.usda",
+  "replaced": [
+    { "type": "sublayer",   "old": "./lighting.usda",      "new": "./lighting_v2.usda" },
+    { "type": "reference",  "prim_path": "/World/car",     "old": "./assets/car.usda",  "new": "/abs/assets/car_v2.usda" },
+    { "type": "payload",    "prim_path": "/World/env",     "old": "./env.usda",          "new": "./env_v2.usda" }
+  ],
+  "total_replaced": 3
+}
+```
+
+`type` is one of `"sublayer"`, `"reference"`, or `"payload"`. Reference and payload entries include `prim_path` indicating where in the layer the arc is declared. Anchors whose `old` key is not found in the file are silently skipped and do not appear in `replaced`.
+
+---
+
 #### `usd_stitch_clips`
 
 Stitches per-frame USD cache files into a single USD Value Clips stage. Automatically generates `topology.usd` and `manifest.usd` alongside the output. **This tool writes files to disk.**
