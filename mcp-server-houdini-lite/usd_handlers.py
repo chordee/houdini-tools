@@ -411,8 +411,10 @@ async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextConte
 
 async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
     path = arguments.get("path", "")
-    replacements = arguments.get("replacements") or {}
-    if not isinstance(replacements, dict):
+    replacements = arguments.get("replacements")
+    if replacements is None:
+        replacements = {}
+    elif not isinstance(replacements, dict):
         raise ValueError("[-32602] replacements must be an object")
     try:
         result = replace_anchors(path, replacements)
