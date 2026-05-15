@@ -1,0 +1,14 @@
+{
+  "name": "houdini-tools",
+  "description": "Houdini toolkit including command-line tools, installation path detection, and a bgeo/USD MCP server",
+  "version": "1.0.0",
+  "author": {
+    "name": "chordee"
+  },
+  "mcpServers": {
+    "houdini-lite": {
+      "command": "uv",
+      "args": ["run", "--directory", "${extensionPath}/mcp-server-houdini-lite", "server.py"]
+    }
+  }
+}

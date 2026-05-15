@@ -1,0 +1,20 @@
+[project]
+name = "houdini-lite"
+version = "0.1.0"
+description = "MCP server for Houdini pipeline tools"
+requires-python = ">=3.11"
+dependencies = [
+    "blosc>=1.11.0,<2.0",
+    "mcp>=1.0.0",
+    "usd-core>=26.3",
+]
+
+[project.scripts]
+houdini-lite = "server:main"
+
+[tool.hatch.build.targets.wheel]
+include = ["server.py", "bgeo_handlers.py", "bgeo_reader.py", "bgeo_clips.py", "blosc_io.py", "usd_handlers.py", "usd_tools.py", "usd_clips.py"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
