@@ -219,6 +219,72 @@ def read_composition_arcs(path: str) -> dict:
     }
 
 
+def replace_anchors(path: str, replacements: dict[str, str]) -> dict:
+    """
+    Replace asset paths for sublayers, references, and payloads in a USD layer.
+
+    Matches anchor strings exactly as stored in the file (the same strings
+    returned by read_composition_arcs). Saves the layer in-place.
+
+    Args:
+        path         — absolute path to a USD file to modify
+        replacements — {old_asset_path: new_asset_path}
+
+    Returns a dict with keys:
+        path           — input file path
+        replaced       — list of replaced anchor dicts (type, old, new, prim_path)
+        total_replaced — count of replaced anchors
+
+    Raises:
+        FileNotFoundError — file does not exist
+        UsdOpenError      — file could not be opened as a USD layer
+    """
+    _assert_exists(path)
+    layer = Sdf.Layer.FindOrOpen(path)
+    if layer is None:
+        raise UsdOpenError(f"could not open USD layer: {path}")
+
+    replaced: list[dict] = []
+
+    with Sdf.ChangeBlock():
+        for i, p in enumerate(list(layer.subLayerPaths)):
+            if p in replacements:
+                layer.subLayerPaths[i] = replacements[p]
+                replaced.append({"type": "sublayer", "old": p, "new": replacements[p]})
+
+        def _visit(sdf_path: Sdf.Path) -> None:
+            spec = layer.GetObjectAtPath(sdf_path)
+            if not isinstance(spec, Sdf.PrimSpec):
+                return
+            prim_str = str(sdf_path)
+            for ref in spec.referenceList.GetAppliedItems():
+                if ref.assetPath in replacements:
+                    new_ref = Sdf.Reference(
+                        assetPath=replacements[ref.assetPath],
+                        primPath=ref.primPath,
+                        layerOffset=ref.layerOffset,
+                        customData=ref.customData,
+                    )
+                    spec.referenceList.ReplaceItemEdits(ref, new_ref)
+                    replaced.append({"type": "reference", "prim_path": prim_str,
+                                     "old": ref.assetPath, "new": replacements[ref.assetPath]})
+            for pay in spec.payloadList.GetAppliedItems():
+                if pay.assetPath in replacements:
+                    new_pay = Sdf.Payload(
+                        assetPath=replacements[pay.assetPath],
+                        primPath=pay.primPath,
+                        layerOffset=pay.layerOffset,
+                    )
+                    spec.payloadList.ReplaceItemEdits(pay, new_pay)
+                    replaced.append({"type": "payload", "prim_path": prim_str,
+                                     "old": pay.assetPath, "new": replacements[pay.assetPath]})
+
+        layer.Traverse(layer.pseudoRoot.path, _visit)
+
+    layer.Save()
+    return {"path": path, "replaced": replaced, "total_replaced": len(replaced)}
+
+
 def read_cameras(path: str, frame: float | None = None) -> dict:
     """
     Find all Camera prims in a fully composed USD stage and read their

@@ -12,6 +12,7 @@ from usd_tools import (
     read_layer_hierarchy,
     read_composed_hierarchy,
     read_composition_arcs,
+    replace_anchors,
     read_cameras,
     read_prim_attributes,
     read_attribute_value,
@@ -105,6 +106,34 @@ TOOLS = [
                     "type": "string",
                     "description": "Absolute path to a USD file",
                 }
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_replace_anchors",
+        description=(
+            "Replace multiple anchor asset paths (sublayers, references, payloads) "
+            "in a single USD layer file in one operation. "
+            "Edits the file in-place. "
+            "Use usd_read_composition_arcs first to inspect existing anchors."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["path", "replacements"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to a USD file to modify",
+                },
+                "replacements": {
+                    "type": "object",
+                    "description": (
+                        "Map of {old_asset_path: new_asset_path}. "
+                        "Keys must match the exact strings stored in the USD file "
+                        "(as returned by usd_read_composition_arcs)."
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
             },
         },
     ),
@@ -326,6 +355,8 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_read_hierarchy_composed(arguments)
     if name == "usd_read_composition_arcs":
         return await _handle_read_composition_arcs(arguments)
+    if name == "usd_replace_anchors":
+        return await _handle_replace_anchors(arguments)
     if name == "usd_read_cameras":
         return await _handle_read_cameras(arguments)
     if name == "usd_stitch_clips":
@@ -376,6 +407,21 @@ async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextConte
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e)
+
+
+async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
+    path = arguments.get("path", "")
+    replacements = arguments.get("replacements")
+    if replacements is None:
+        replacements = {}
+    elif not isinstance(replacements, dict):
+        raise ValueError("[-32602] replacements must be an object")
+    try:
+        result = replace_anchors(path, replacements)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e)
+
 
 async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
     path = arguments.get("path", "")
