@@ -38,9 +38,10 @@ def stitch_vdb_volume_usd(
         raise VdbStitchError(
             f"parent_primpath must be an absolute USD path: {parent_primpath!r}"
         )
-    if not volume_name or "/" in volume_name:
+    if not volume_name or not Sdf.Path.IsValidIdentifier(volume_name):
         raise VdbStitchError(
-            f"volume_name must be a non-empty single path segment, "
+            f"volume_name must be a valid USD prim identifier "
+            f"(letters, digits, underscores; cannot start with a digit), "
             f"got {volume_name!r}"
         )
 
