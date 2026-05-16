@@ -1,6 +1,6 @@
 ---
 name: houdini-lite
-description: Inspect Houdini bgeo.sc geometry caches and USD scene files using MCP tools, without loading full geometry into memory. Use when the user needs to read cache metadata, attribute info, frame sequences, USD hierarchy, composition arcs, cameras, replace anchors, or stitch USD value clips.
+description: Inspect Houdini bgeo.sc geometry caches, OpenVDB volume caches, and USD scene files using MCP tools, without loading full geometry into memory. Use when the user needs to read cache metadata, VDB grid lists, attribute info, frame sequences, USD hierarchy, composition arcs, cameras, replace anchors, or stitch USD value clips.
 ---
 
 # Houdini Lite Expert
@@ -13,7 +13,13 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 
 - **counts only** → `bgeo_read_header`
 - **attributes, geometry type, detail values, software info** → `bgeo_inspect`
-- **frame range / total size of a sequence** → `bgeo_list_sequence`
+- **discover sequences / frame range / total size in a directory** → `bgeo_list_sequence`
+
+### VDB (header-only parse via Python stdlib — no pyopenvdb / no Houdini)
+
+- **grid names, types, friendly labels, file-level metadata** → `vdb_inspect`
+- **discover sequences / frame range / total size in a directory** → `vdb_list_sequence`
+- **stitch per-frame .vdb sequence into a USD Volume (time-sampled filePath)** → `vdb_stitch_volume_usd`
 
 ### USD read (never loads geometry; payloads deferred by default)
 
@@ -29,6 +35,7 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 
 - **stitch per-frame USD files into Value Clips** → `usd_stitch_clips`
 - **stitch per-frame .bgeo.sc files into a USD Value Clips stage** → `bgeo_stitch_usd_clips`
+- **stitch per-frame .vdb files into a USD Volume** → `vdb_stitch_volume_usd` (under VDB above; note this builds a UsdVol.Volume with time-sampled OpenVDBAsset.filePath, **not** USD Value Clips — clips don't apply to volumes)
 - **batch-replace anchor asset paths in a single layer** → `usd_replace_anchors`
 
 ## Behavioral Rules
@@ -37,6 +44,7 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **Write tools** intentionally return a concise summary only. For details (animated prims, attribute tables), follow up with the read tools.
 - **`usd_replace_anchors`** does pure string replacement on `assetPath`; `primPath`, `layerOffset`, and `customData` are preserved. Keys in the `replacements` map must match the stored strings character-for-character — call `usd_read_composition_arcs` first to capture them.
 - **Prims inside payloads** are not visible to `usd_read_prim_attributes` / `usd_read_attribute_value` unless `load_payloads: true` is passed.
+- **`bgeo_list_sequence` and `vdb_list_sequence` auto-group** by base name. A directory with several coexisting sequences returns each one separately in `sequences[]`; files whose frame number cannot be parsed go to `unmatched[]`.
 
 ## Workflows
 
@@ -51,6 +59,13 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 1. Confirm the file path template with the user.
 2. Call `bgeo_stitch_usd_clips` with only `filepath_template` + `output_path`; primpath and frame range are auto-detected from `usdconfigpathprefix` / `usdconfigsampleframe` detail attributes.
 3. Note that the output USD references the `.bgeo.sc` files directly — Houdini (or a bgeo USD plugin) is required at load time.
+
+### VDB sequence → USD Volume
+
+1. Pick a probe frame and call `vdb_inspect` (or rely on the default — first frame of `frame_range`) to confirm grid names.
+2. Call `vdb_stitch_volume_usd` with `filepath_template`, `output_path`, `frame_range`, `volume_name`, `parent_primpath`.
+3. Use a **relative `filepath_template`** if the output USD needs to be portable; the tool writes the resolved paths into `filePath.timeSamples` as-is.
+4. The output USD has `field:<grid_name>` relationships from `UsdVol.Volume` to per-grid `UsdVol.OpenVDBAsset` prims; stage `startTimeCode` / `endTimeCode` reflect the frame range.
 
 ### Anchor rewrite — asset relocation / path migration
 
