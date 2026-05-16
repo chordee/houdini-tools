@@ -38,9 +38,11 @@ TOOLS = [
     types.Tool(
         name="bgeo_list_sequence",
         description=(
-            "Scan a directory for a numbered .bgeo.sc sequence. "
-            "Returns frame range, file count, and per-frame file sizes "
-            "without reading any geometry data."
+            "Scan a directory for numbered .bgeo.sc files and group them into "
+            "sequences by base name (the filename portion before the frame "
+            "number). Multiple coexisting sequences in one directory are "
+            "returned separately. Files whose frame number cannot be extracted "
+            "are reported in 'unmatched'. No geometry data is read."
         ),
         inputSchema={
             "type": "object",
@@ -48,11 +50,11 @@ TOOLS = [
             "properties": {
                 "directory": {
                     "type": "string",
-                    "description": "Directory path containing the cache sequence",
+                    "description": "Directory path containing the cache sequence(s)",
                 },
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern, e.g. 'pyro_cache.*.bgeo.sc'. Defaults to '*.bgeo.sc'",
+                    "description": "Glob pattern, default '*.bgeo.sc'",
                     "default": "*.bgeo.sc",
                 },
             },
@@ -229,18 +231,7 @@ async def _handle_inspect(arguments: dict) -> list[types.TextContent]:
 # bgeo_list_sequence
 # ---------------------------------------------------------------------------
 
-_FRAME_RE = re.compile(r"\.(\d+)\.bgeo\.sc$", re.IGNORECASE)
-
-
-def _extract_frame(filename: str):
-    """Extract frame number from filename; returns None if not found."""
-    m = _FRAME_RE.search(filename)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"(\d+)", filename)
-    if m:
-        return int(m.group(1))
-    return None
+_BGEO_FRAME_RE = re.compile(r"^(.*)\.(\d+)\.bgeo\.sc$", re.IGNORECASE)
 
 
 async def _handle_list_sequence(arguments: dict) -> list[types.TextContent]:
@@ -249,45 +240,44 @@ async def _handle_list_sequence(arguments: dict) -> list[types.TextContent]:
 
     dir_path = Path(directory)
     if not dir_path.is_dir():
-        raise ValueError(f"directory not found: {directory}")
+        raise ValueError(f"[-32602] directory not found: {directory}")
 
     files = sorted(dir_path.glob(pattern))
-    if not files:
-        result = {
-            "directory": directory,
-            "frame_count": 0,
-            "frame_range": None,
-            "total_size_bytes": 0,
-            "frames": [],
-        }
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-
-    frames = []
-    total_size = 0
-    frame_numbers = []
+    sequences: dict[str, list[dict]] = {}
+    unmatched: list[dict] = []
 
     for f in files:
         size = f.stat().st_size
-        total_size += size
-        frame_num = _extract_frame(f.name)
-        if frame_num is not None:
-            frame_numbers.append(frame_num)
-        frames.append({
-            "frame": frame_num,
-            "filename": f.name,
-            "size_bytes": size,
+        m = _BGEO_FRAME_RE.match(f.name)
+        if m:
+            base = m.group(1)
+            frame = int(m.group(2))
+            sequences.setdefault(base, []).append({
+                "frame":      frame,
+                "filename":   f.name,
+                "size_bytes": size,
+            })
+        else:
+            unmatched.append({"filename": f.name, "size_bytes": size})
+
+    out_sequences = []
+    for base in sorted(sequences.keys()):
+        frames = sorted(sequences[base], key=lambda x: x["frame"])
+        total_size = sum(x["size_bytes"] for x in frames)
+        frame_numbers = [x["frame"] for x in frames]
+        out_sequences.append({
+            "base_name":        base,
+            "frame_count":      len(frames),
+            "frame_range":      {"first": min(frame_numbers), "last": max(frame_numbers)},
+            "total_size_bytes": total_size,
+            "frames":           frames,
         })
 
-    frame_range = None
-    if frame_numbers:
-        frame_range = {"first": min(frame_numbers), "last": max(frame_numbers)}
-
     result = {
-        "directory": directory,
-        "frame_count": len(frames),
-        "frame_range": frame_range,
-        "total_size_bytes": total_size,
-        "frames": frames,
+        "directory":      directory,
+        "sequence_count": len(out_sequences),
+        "sequences":      out_sequences,
+        "unmatched":      unmatched,
     }
     return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
 
