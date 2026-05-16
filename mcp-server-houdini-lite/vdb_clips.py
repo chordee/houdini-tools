@@ -9,7 +9,7 @@ required — works with only usd-core.
 
 from pathlib import Path
 
-from pxr import Sdf, Usd, UsdGeom, UsdVol
+from pxr import Usd, UsdGeom, UsdVol
 
 from usd_clips import resolve_filepath
 from vdb_tools import VdbParseError, read_vdb_inspect
