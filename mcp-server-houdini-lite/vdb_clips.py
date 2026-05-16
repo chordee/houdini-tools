@@ -73,7 +73,12 @@ def stitch_vdb_volume_usd(
 
     if probe_frame is None:
         probe_frame = start
-    probe_frame = int(probe_frame)
+    try:
+        probe_frame = int(probe_frame)
+    except (TypeError, ValueError) as e:
+        raise VdbStitchError(
+            f"invalid probe_frame, expected integer, got {probe_frame!r}"
+        ) from e
     if not (start <= probe_frame <= end):
         raise VdbStitchError(
             f"probe_frame {probe_frame} is outside frame_range "
