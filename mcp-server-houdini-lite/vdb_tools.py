@@ -142,35 +142,46 @@ def read_vdb_inspect(path: str) -> dict:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"file not found: {path}")
+    if not p.is_file():
+        raise VdbParseError(f"path is not a regular file: {path}")
 
-    with open(p, "rb") as f:
-        magic = struct.unpack("<q", f.read(8))[0]
-        if magic != VDB_MAGIC:
-            raise VdbParseError(f"not a valid VDB file (magic mismatch): {path}")
+    try:
+        with open(p, "rb") as f:
+            magic = struct.unpack("<q", f.read(8))[0]
+            if magic != VDB_MAGIC:
+                raise VdbParseError(f"not a valid VDB file (magic mismatch): {path}")
 
-        file_version    = struct.unpack("<I", f.read(4))[0]
-        major, minor    = struct.unpack("<II", f.read(8))
-        has_grid_offsets = struct.unpack("<?", f.read(1))[0]
+            file_version    = struct.unpack("<I", f.read(4))[0]
+            major, minor    = struct.unpack("<II", f.read(8))
+            has_grid_offsets = struct.unpack("<?", f.read(1))[0]
 
-        uuid_bytes = f.read(36)
-        uuid = uuid_bytes.decode("ascii", errors="replace")
+            uuid_bytes = f.read(36)
+            uuid = uuid_bytes.decode("ascii", errors="replace")
 
-        metadata = _read_metadata(f)
+            metadata = _read_metadata(f)
 
-        if not has_grid_offsets:
-            raise VdbParseError(
-                "VDB file has no grid offsets; cannot inspect without "
-                "parsing grid bodies. Re-save with offsets enabled."
-            )
+            if not has_grid_offsets:
+                raise VdbParseError(
+                    "VDB file has no grid offsets; cannot inspect without "
+                    "parsing grid bodies. Re-save with offsets enabled."
+                )
 
-        grid_count = struct.unpack("<I", f.read(4))[0]
-        grids = []
-        for _ in range(grid_count):
-            g = _read_grid_descriptor(f, has_grid_offsets)
-            end_pos = g.pop("_end_pos")
-            grids.append(g)
-            if end_pos is not None:
-                f.seek(end_pos)
+            grid_count = struct.unpack("<I", f.read(4))[0]
+            grids = []
+            for _ in range(grid_count):
+                g = _read_grid_descriptor(f, has_grid_offsets)
+                end_pos = g.pop("_end_pos")
+                grids.append(g)
+                if end_pos is not None:
+                    f.seek(end_pos)
+    except (struct.error, IndexError, UnicodeDecodeError) as e:
+        raise VdbParseError(
+            f"VDB header is malformed or truncated: {path}: {e}"
+        ) from e
+    except OSError as e:
+        raise VdbParseError(
+            f"could not read VDB file: {path}: {e}"
+        ) from e
 
     return {
         "path":            str(p),

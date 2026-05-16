@@ -222,15 +222,16 @@ Scans a directory for numbered `.vdb` files and **groups them into sequences by 
       "frame_range": { "first": 1, "last": 12 },
       "total_size_bytes": 2881896,
       "frames": [
-        { "frame": 1, "filename": "sphere.1.vdb", "size_bytes": 240158 }
+        { "frame": 1,  "filename": "sphere.1.vdb",  "size_bytes": 240158 },
+        { "frame": 2,  "filename": "sphere.2.vdb",  "size_bytes": 240158 }
       ]
-    },
-    { "base_name": "sphere_a", "frame_count": 13, "frame_range": { "first": 12, "last": 24 }, "total_size_bytes": 3120000, "frames": [] },
-    { "base_name": "sphere_b", "frame_count": 14, "frame_range": { "first": 2,  "last": 15 }, "total_size_bytes": 3360000, "frames": [] }
+    }
   ],
   "unmatched": []
 }
 ```
+
+Per-sequence `frames` is always fully populated (length equal to `frame_count`); the example above is abridged to a single sequence with two frames.
 
 ---
 

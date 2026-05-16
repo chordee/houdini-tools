@@ -142,13 +142,15 @@ async def call_vdb_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def _handle_inspect(arguments: dict) -> list[types.TextContent]:
     path = arguments.get("path", "")
+    if not path:
+        raise ValueError("[-32602] 'path' is required")
     try:
         result = read_vdb_inspect(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError as e:
-        raise ValueError(f"[-32602] {e}")
+        raise ValueError(f"[-32602] {e}") from e
     except VdbParseError as e:
-        raise ValueError(f"[-32600] {e}")
+        raise ValueError(f"[-32600] {e}") from e
 
 
 # ---------------------------------------------------------------------------
@@ -190,9 +192,9 @@ async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
         )
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError as e:
-        raise ValueError(f"[-32602] {e}")
+        raise ValueError(f"[-32602] {e}") from e
     except VdbStitchError as e:
-        raise ValueError(f"[-32600] {e}")
+        raise ValueError(f"[-32600] {e}") from e
 
 
 # ---------------------------------------------------------------------------

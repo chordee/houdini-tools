@@ -9,7 +9,7 @@ required — works with only usd-core.
 
 from pathlib import Path
 
-from pxr import Usd, UsdGeom, UsdVol
+from pxr import Sdf, Usd, UsdGeom, UsdVol
 
 from usd_clips import resolve_filepath
 from vdb_tools import VdbParseError, read_vdb_inspect
@@ -91,6 +91,14 @@ def stitch_vdb_volume_usd(
     if not target_grids:
         raise VdbStitchError(
             f"no grids to write (probe file {probe_path} has no grids)"
+        )
+
+    invalid = [g for g in target_grids if not Sdf.Path.IsValidIdentifier(g)]
+    if invalid:
+        raise VdbStitchError(
+            f"grid names are not valid USD prim identifiers: {invalid}. "
+            f"USD prim names must start with a letter or underscore and "
+            f"contain only letters, digits, and underscores."
         )
 
     out_path = Path(output_path)
