@@ -29,14 +29,27 @@ def stitch_vdb_volume_usd(
     grids: list[str] | None = None,
     strict: bool = False,
 ) -> dict:
-    start, end = int(frame_range[0]), int(frame_range[1])
+    try:
+        start, end = int(frame_range[0]), int(frame_range[1])
+    except (IndexError, TypeError, ValueError) as e:
+        raise VdbStitchError(
+            f"invalid frame_range, expected [start, end] integers, "
+            f"got {frame_range!r}"
+        ) from e
     if start > end:
         raise VdbStitchError(
             f"invalid frame_range: start ({start}) > end ({end})"
         )
-    if not parent_primpath.startswith("/"):
+    if not Sdf.Path.IsValidPathString(parent_primpath):
         raise VdbStitchError(
-            f"parent_primpath must be an absolute USD path: {parent_primpath!r}"
+            f"parent_primpath is not a valid USD path string: "
+            f"{parent_primpath!r}"
+        )
+    parent_path = Sdf.Path(parent_primpath)
+    if not (parent_path.IsAbsolutePath() and parent_path.IsPrimPath()):
+        raise VdbStitchError(
+            f"parent_primpath must be an absolute USD prim path "
+            f"(e.g. '/scene'), got {parent_primpath!r}"
         )
     if not volume_name or not Sdf.Path.IsValidIdentifier(volume_name):
         raise VdbStitchError(
@@ -78,7 +91,7 @@ def stitch_vdb_volume_usd(
         raise VdbStitchError(f"could not inspect probe file: {e}") from e
 
     probe_grid_names = [g["name"] for g in probe_info["grids"]]
-    if grids:
+    if grids is not None:
         unknown = [g for g in grids if g not in probe_grid_names]
         if unknown:
             raise VdbStitchError(
