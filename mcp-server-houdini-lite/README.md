@@ -159,6 +159,45 @@ Parses the binary header of an OpenVDB (`.vdb`) file using only the Python stand
 
 Known grid types are mapped to friendly labels (`FloatGrid`, `Vec3SGrid`, etc.); unknown types fall back to the raw `Tree_*` string. File-level metadata values are decoded for common types (`string`, `int32`, `int64`, `float`, `double`, `bool`, `vec3i`, `vec3s`, `vec3d`); other known fixed-width types are skipped with `value: null`.
 
+#### `vdb_stitch_volume_usd`
+
+Stitches a numbered `.vdb` sequence into a single USD file containing a `UsdVol.Volume` with one `UsdVol.OpenVDBAsset` child per grid. The `filePath`, `fieldName`, and `fieldIndex` attributes are time-sampled across `frame_range`. Grids are auto-detected from the probe frame unless an explicit list is given. **No Houdini required. This tool writes files to disk.**
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filepath_template` | string | yes | Per-frame template; supports `{frame:04d}` or `$F4` format |
+| `output_path` | string | yes | Absolute output path (`.usd` / `.usda` / `.usdc`). Must not already exist. |
+| `frame_range` | `[int, int]` | yes | `[start, end]` frame range (inclusive) |
+| `volume_name` | string | yes | Name of the `UsdVol.Volume` prim (single path segment) |
+| `parent_primpath` | string | yes | Absolute USD path to the parent Xform, e.g. `/scene`. Created if missing. |
+| `probe_frame` | integer | no | Frame used to detect grids. Defaults to start of `frame_range` |
+| `grids` | string[] | no | Explicit grid names to include. Defaults to all grids from probe |
+| `strict` | boolean | no | Abort if any source file is missing. Default: `false` |
+
+**Output** (JSON)
+
+```json
+{
+  "status": "ok",
+  "output_path": "/scene/smoke.usda",
+  "volume_primpath": "/scene/smoke",
+  "grids": [
+    { "grid_name": "burn",        "prim_path": "/scene/smoke/burn" },
+    { "grid_name": "temperature", "prim_path": "/scene/smoke/temperature" },
+    { "grid_name": "v",           "prim_path": "/scene/smoke/v" }
+  ],
+  "frame_range": [1, 12],
+  "frame_count": 12,
+  "probe_frame": 1,
+  "probe_path": "/cache/sim.1.vdb",
+  "missing_files": []
+}
+```
+
+The output USD declares `field:<grid_name>` relationships from the Volume to each `OpenVDBAsset`, and writes time samples on the stage's start/end time codes. `filePath` is written exactly as resolved by `filepath_template` — use a relative template if you want a portable output.
+
 #### `vdb_list_sequence`
 
 Scans a directory for numbered `.vdb` files and **groups them into sequences by base name**, same shape as `bgeo_list_sequence`. Useful when a single directory holds multiple coexisting VDB sequences.
