@@ -9,6 +9,7 @@ from pathlib import Path
 import mcp.types as types
 
 from vdb_tools import VdbParseError, read_vdb_inspect
+from vdb_clips import VdbStitchError, stitch_vdb_volume_usd
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -31,6 +32,66 @@ TOOLS = [
                     "type": "string",
                     "description": "Absolute path to a .vdb file",
                 }
+            },
+        },
+    ),
+    types.Tool(
+        name="vdb_stitch_volume_usd",
+        description=(
+            "Stitch a numbered .vdb sequence into a single USD file "
+            "containing a UsdVol.Volume with one UsdVol.OpenVDBAsset per "
+            "grid. The filePath, fieldName, and fieldIndex attributes are "
+            "time-sampled across frame_range. Grids are auto-detected from "
+            "the probe frame unless an explicit list is given. No Houdini "
+            "required. This tool writes files to disk."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": [
+                "filepath_template",
+                "output_path",
+                "frame_range",
+                "volume_name",
+                "parent_primpath",
+            ],
+            "properties": {
+                "filepath_template": {
+                    "type": "string",
+                    "description": "Per-frame template; supports {frame:04d} or $F4 format.",
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "Absolute output path (.usd / .usda / .usdc). Must not already exist.",
+                },
+                "frame_range": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "[start, end] frame range (inclusive).",
+                },
+                "volume_name": {
+                    "type": "string",
+                    "description": "Name of the UsdVol.Volume prim (single path segment, no slashes).",
+                },
+                "parent_primpath": {
+                    "type": "string",
+                    "description": "Absolute USD path to the parent Xform, e.g. '/scene'. Created if missing.",
+                },
+                "probe_frame": {
+                    "type": "integer",
+                    "description": "Frame used to detect grids. Defaults to start of frame_range.",
+                },
+                "grids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Explicit grid names to include. Defaults to all grids from probe.",
+                },
+                "strict": {
+                    "type": "boolean",
+                    "description": "Abort if any source file is missing. Default: false.",
+                    "default": False,
+                },
             },
         },
     ),
@@ -70,6 +131,8 @@ async def call_vdb_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_inspect(arguments)
     if name == "vdb_list_sequence":
         return await _handle_list_sequence(arguments)
+    if name == "vdb_stitch_volume_usd":
+        return await _handle_stitch_volume_usd(arguments)
     raise ValueError(f"unknown vdb tool: {name}")
 
 
@@ -85,6 +148,50 @@ async def _handle_inspect(arguments: dict) -> list[types.TextContent]:
     except FileNotFoundError as e:
         raise ValueError(f"[-32602] {e}")
     except VdbParseError as e:
+        raise ValueError(f"[-32600] {e}")
+
+
+# ---------------------------------------------------------------------------
+# vdb_stitch_volume_usd
+# ---------------------------------------------------------------------------
+
+async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
+    filepath_template = arguments.get("filepath_template", "")
+    output_path       = arguments.get("output_path", "")
+    frame_range_raw   = arguments.get("frame_range")
+    volume_name       = arguments.get("volume_name", "")
+    parent_primpath   = arguments.get("parent_primpath", "")
+
+    if not filepath_template or not output_path or not volume_name or not parent_primpath:
+        raise ValueError(
+            "[-32602] filepath_template, output_path, volume_name, "
+            "and parent_primpath are required"
+        )
+    if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
+        raise ValueError("[-32602] frame_range must be a [start, end] integer array")
+
+    frame_range     = (int(frame_range_raw[0]), int(frame_range_raw[1]))
+    probe_frame_raw = arguments.get("probe_frame")
+    probe_frame     = int(probe_frame_raw) if probe_frame_raw is not None else None
+    grids_raw       = arguments.get("grids")
+    grids           = [str(g) for g in grids_raw] if isinstance(grids_raw, list) else None
+    strict          = bool(arguments.get("strict", False))
+
+    try:
+        result = stitch_vdb_volume_usd(
+            filepath_template=filepath_template,
+            output_path=output_path,
+            frame_range=frame_range,
+            volume_name=volume_name,
+            parent_primpath=parent_primpath,
+            probe_frame=probe_frame,
+            grids=grids,
+            strict=strict,
+        )
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except FileNotFoundError as e:
+        raise ValueError(f"[-32602] {e}")
+    except VdbStitchError as e:
         raise ValueError(f"[-32600] {e}")
 
 
