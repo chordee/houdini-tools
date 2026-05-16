@@ -1,6 +1,6 @@
 ---
 name: houdini-lite
-description: Inspect Houdini bgeo.sc geometry caches and USD scene files using MCP tools, without loading full geometry into memory. Use when the user needs to read cache metadata, attribute info, frame sequences, USD hierarchy, composition arcs, cameras, replace anchors, or stitch USD value clips.
+description: Inspect Houdini bgeo.sc geometry caches, OpenVDB volume caches, and USD scene files using MCP tools, without loading full geometry into memory. Use when the user needs to read cache metadata, VDB grid lists, attribute info, frame sequences, USD hierarchy, composition arcs, cameras, replace anchors, or stitch USD value clips.
 ---
 
 # Houdini Lite Expert
@@ -13,7 +13,12 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 
 - **counts only** → `bgeo_read_header`
 - **attributes, geometry type, detail values, software info** → `bgeo_inspect`
-- **frame range / total size of a sequence** → `bgeo_list_sequence`
+- **discover sequences / frame range / total size in a directory** → `bgeo_list_sequence`
+
+### VDB (header-only parse via Python stdlib — no pyopenvdb / no Houdini)
+
+- **grid names, types, friendly labels, file-level metadata** → `vdb_inspect`
+- **discover sequences / frame range / total size in a directory** → `vdb_list_sequence`
 
 ### USD read (never loads geometry; payloads deferred by default)
 
@@ -37,6 +42,7 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **Write tools** intentionally return a concise summary only. For details (animated prims, attribute tables), follow up with the read tools.
 - **`usd_replace_anchors`** does pure string replacement on `assetPath`; `primPath`, `layerOffset`, and `customData` are preserved. Keys in the `replacements` map must match the stored strings character-for-character — call `usd_read_composition_arcs` first to capture them.
 - **Prims inside payloads** are not visible to `usd_read_prim_attributes` / `usd_read_attribute_value` unless `load_payloads: true` is passed.
+- **`bgeo_list_sequence` and `vdb_list_sequence` auto-group** by base name. A directory with several coexisting sequences returns each one separately in `sequences[]`; files whose frame number cannot be parsed go to `unmatched[]`.
 
 ## Workflows
 

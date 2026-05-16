@@ -84,7 +84,7 @@ Reads only the first Blosc chunk — fast even for multi-GB files.
 
 #### `bgeo_list_sequence`
 
-Scans a directory for a numbered `.bgeo.sc` sequence. Does not open any geometry file.
+Scans a directory for numbered `.bgeo.sc` files and **groups them into sequences by base name** (the filename portion before the frame number). Multiple coexisting sequences in one directory are returned separately. Files whose frame number cannot be extracted are reported in `unmatched`. Does not open any geometry file.
 
 **Input**
 
@@ -98,12 +98,98 @@ Scans a directory for a numbered `.bgeo.sc` sequence. Does not open any geometry
 ```json
 {
   "directory": "/path/to/cache",
-  "frame_count": 240,
-  "frame_range": { "first": 1001, "last": 1240 },
-  "total_size_bytes": 42949672960,
-  "frames": [
-    { "frame": 1001, "filename": "flip.1001.bgeo.sc", "size_bytes": 178257920 }
+  "sequence_count": 2,
+  "sequences": [
+    {
+      "base_name": "flip",
+      "frame_count": 240,
+      "frame_range": { "first": 1001, "last": 1240 },
+      "total_size_bytes": 42949672960,
+      "frames": [
+        { "frame": 1001, "filename": "flip.1001.bgeo.sc", "size_bytes": 178257920 }
+      ]
+    },
+    {
+      "base_name": "pyro",
+      "frame_count": 120,
+      "frame_range": { "first": 1001, "last": 1120 },
+      "total_size_bytes": 1234567,
+      "frames": [
+        { "frame": 1001, "filename": "pyro.1001.bgeo.sc", "size_bytes": 10000 }
+      ]
+    }
+  ],
+  "unmatched": []
+}
+```
+
+---
+
+### VDB
+
+#### `vdb_inspect`
+
+Parses the binary header of an OpenVDB (`.vdb`) file using only the Python standard library — **no `pyopenvdb` and no Houdini required**. Returns each grid's name, raw grid type, a friendly type label, and any instance parent name. Also returns file-level metadata (the standard OpenVDB header `MetaMap`). No voxel data is loaded.
+
+**Input**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Absolute path to a `.vdb` file |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/cache/sim.1001.vdb",
+  "file_version": 224,
+  "library_version": [12, 0],
+  "uuid": "4B7928FA-C534-A025-7306-DAD9E5618DA5",
+  "metadata": [
+    { "key": "creator", "type": "string", "value": "Houdini 21.0.559/GEO_VDBTranslator" }
+  ],
+  "grid_count": 3,
+  "grids": [
+    { "name": "burn",        "grid_type": "Tree_float_5_4_3",           "friendly_type": "FloatGrid  (32-bit)",            "instance": "" },
+    { "name": "temperature", "grid_type": "Tree_float_5_4_3_HalfFloat", "friendly_type": "FloatGrid  (saved as 16-bit half)", "instance": "" },
+    { "name": "v",           "grid_type": "Tree_vec3s_5_4_3",           "friendly_type": "Vec3SGrid  (32-bit)",            "instance": "" }
   ]
+}
+```
+
+Known grid types are mapped to friendly labels (`FloatGrid`, `Vec3SGrid`, etc.); unknown types fall back to the raw `Tree_*` string. File-level metadata values are decoded for common types (`string`, `int32`, `int64`, `float`, `double`, `bool`, `vec3i`, `vec3s`, `vec3d`); other known fixed-width types are skipped with `value: null`.
+
+#### `vdb_list_sequence`
+
+Scans a directory for numbered `.vdb` files and **groups them into sequences by base name**, same shape as `bgeo_list_sequence`. Useful when a single directory holds multiple coexisting VDB sequences.
+
+**Input**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `directory` | string | Directory to scan |
+| `pattern` | string | Glob pattern (default: `*.vdb`) |
+
+**Output** (JSON)
+
+```json
+{
+  "directory": "/cache/vdb",
+  "sequence_count": 3,
+  "sequences": [
+    {
+      "base_name": "sphere",
+      "frame_count": 12,
+      "frame_range": { "first": 1, "last": 12 },
+      "total_size_bytes": 2881896,
+      "frames": [
+        { "frame": 1, "filename": "sphere.1.vdb", "size_bytes": 240158 }
+      ]
+    },
+    { "base_name": "sphere_a", "frame_count": 13, "frame_range": { "first": 12, "last": 24 }, "total_size_bytes": 3120000, "frames": [] },
+    { "base_name": "sphere_b", "frame_count": 14, "frame_range": { "first": 2,  "last": 15 }, "total_size_bytes": 3360000, "frames": [] }
+  ],
+  "unmatched": []
 }
 ```
 
