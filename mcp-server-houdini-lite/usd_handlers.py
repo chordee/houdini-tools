@@ -8,6 +8,7 @@ import mcp.types as types
 
 from usd_tools import (
     UsdOpenError,
+    create_expressions_layer,
     read_layer_metadata,
     read_layer_hierarchy,
     read_composed_hierarchy,
@@ -16,6 +17,7 @@ from usd_tools import (
     read_cameras,
     read_prim_attributes,
     read_attribute_value,
+    write_layer_metadata,
 )
 from usd_clips import StitchClipsError, stitch_clips
 
@@ -27,9 +29,14 @@ TOOLS = [
     types.Tool(
         name="usd_read_layer_metadata",
         description=(
-            "Read the customLayerData from a single USD layer file "
-            "(.usd, .usda, .usdc, .usdz) without composition. "
-            "Returns the file format and the customLayerData dictionary."
+            "Read layer-level metadata from a single USD layer file "
+            "(.usd, .usda, .usdc, .usdz) without composition. Returns "
+            "the file format and all standard layer metadata fields: "
+            "defaultPrim, startTimeCode, endTimeCode, framesPerSecond, "
+            "timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, "
+            "and expressionVariables. A field that has not been authored "
+            "in the file is reported as null (distinguishing 'unauthored' "
+            "from a legitimate authored zero / empty value)."
         ),
         inputSchema={
             "type": "object",
@@ -39,6 +46,76 @@ TOOLS = [
                     "type": "string",
                     "description": "Absolute path to a USD file",
                 }
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_write_layer_metadata",
+        description=(
+            "Update layer-level metadata on a USD layer. Only fields "
+            "present in the 'metadata' argument are touched; unmentioned "
+            "fields are left as-is. A field value of null clears the "
+            "field back to its unauthored state. Dict-valued fields "
+            "(customLayerData / expressionVariables) are fully replaced. "
+            "By default the file is saved in-place; pass 'output_path' "
+            "to export to a new file instead (source is not touched, and "
+            "the extension determines format — so this can also convert "
+            ".usda <-> .usdc). expressionVariables values are restricted "
+            "to str / bool / int / homogeneous list of those."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["path", "metadata"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to an existing USD file to edit",
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": (
+                        "Map of metadata field name to new value. Allowed "
+                        "fields: defaultPrim, startTimeCode, endTimeCode, "
+                        "framesPerSecond, timeCodesPerSecond, metersPerUnit, "
+                        "upAxis, customLayerData, expressionVariables. "
+                        "Value null clears the field."
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If given, export the modified layer to "
+                        "this path (must not already exist) instead of "
+                        "saving in-place. The source file is not touched."
+                    ),
+                },
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_create_expressions_layer",
+        description=(
+            "Create a new USD layer at output_path containing ONLY the "
+            "given expressionVariables metadata (no prims, no other "
+            "layer metadata). Useful for pipeline config layers that "
+            "are sublayered or referenced by other USDs to inject "
+            "variables. expression_variables values are restricted to "
+            "str / bool / int / homogeneous list of those. output_path "
+            "must not already exist; file format is determined by the "
+            "extension (.usd / .usda / .usdc)."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["output_path", "expression_variables"],
+            "properties": {
+                "output_path": {
+                    "type": "string",
+                    "description": "Absolute path to the new USD layer (must not exist)",
+                },
+                "expression_variables": {
+                    "type": "object",
+                    "description": "Non-empty dict of variable name to value",
+                },
             },
         },
     ),
@@ -349,6 +426,10 @@ TOOLS = [
 async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "usd_read_layer_metadata":
         return await _handle_read_layer_metadata(arguments)
+    if name == "usd_write_layer_metadata":
+        return await _handle_write_layer_metadata(arguments)
+    if name == "usd_create_expressions_layer":
+        return await _handle_create_expressions_layer(arguments)
     if name == "usd_read_hierarchy":
         return await _handle_read_hierarchy(arguments)
     if name == "usd_read_hierarchy_composed":
@@ -375,6 +456,35 @@ async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent
     path = arguments.get("path", "")
     try:
         result = read_layer_metadata(path)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e)
+
+
+async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
+    path = arguments.get("path", "")
+    metadata = arguments.get("metadata")
+    output_path = arguments.get("output_path")
+    if not path:
+        raise ValueError("[-32602] 'path' is required")
+    if not isinstance(metadata, dict):
+        raise ValueError("[-32602] 'metadata' must be an object")
+    try:
+        result = write_layer_metadata(path, metadata, output_path=output_path)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e)
+
+
+async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextContent]:
+    output_path = arguments.get("output_path", "")
+    expression_variables = arguments.get("expression_variables")
+    if not output_path:
+        raise ValueError("[-32602] 'output_path' is required")
+    if not isinstance(expression_variables, dict):
+        raise ValueError("[-32602] 'expression_variables' must be an object")
+    try:
+        result = create_expressions_layer(output_path, expression_variables)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e)
