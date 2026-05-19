@@ -8,6 +8,7 @@ import mcp.types as types
 
 from usd_tools import (
     UsdOpenError,
+    add_sublayers,
     create_expressions_layer,
     read_layer_metadata,
     read_layer_hierarchy,
@@ -17,6 +18,7 @@ from usd_tools import (
     read_cameras,
     read_prim_attributes,
     read_attribute_value,
+    remove_sublayers,
     write_layer_metadata,
 )
 from usd_clips import StitchClipsError, stitch_clips
@@ -210,6 +212,97 @@ TOOLS = [
                         "(as returned by usd_read_composition_arcs)."
                     ),
                     "additionalProperties": {"type": "string"},
+                },
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_add_sublayers",
+        description=(
+            "Add one or more sublayer asset paths to a USD layer's "
+            "subLayerPaths list. position='prepend' puts the new entries "
+            "at the top (strongest), so for input ['A','B','C'] the final "
+            "list is ['A','B','C', ...existing]. position='append' puts "
+            "them at the bottom (weakest), so final = [...existing, 'A','B','C']. "
+            "Entries whose string is already present are skipped (no-op) "
+            "and reported in 'skipped'; anonymous identifiers (starting "
+            "with 'anon:') are rejected. By default the file is saved in-place; "
+            "pass 'output_path' to export to a new file instead (source is not "
+            "touched, must not already exist; extension decides format)."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["path", "sublayers", "position"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to an existing USD file to edit",
+                },
+                "sublayers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Non-empty list of sublayer asset path strings to add. "
+                        "Stored as-is — pass the exact string you want to "
+                        "appear in subLayerPaths."
+                    ),
+                },
+                "position": {
+                    "type": "string",
+                    "enum": ["prepend", "append"],
+                    "description": (
+                        "'prepend' = insert at the top of subLayerPaths "
+                        "(strongest); 'append' = insert at the bottom "
+                        "(weakest)."
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If given, export the modified layer to "
+                        "this path (must not already exist) instead of "
+                        "saving in-place. The source file is not touched."
+                    ),
+                },
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_remove_sublayers",
+        description=(
+            "Remove one or more sublayer asset paths from a USD layer's "
+            "subLayerPaths list. Matches the exact stored strings (same "
+            "strings returned by usd_read_composition_arcs). Entries not "
+            "found are silently skipped and reported in 'not_found' — no "
+            "error is raised, so partial removals always succeed. "
+            "By default the file is saved in-place; pass 'output_path' to "
+            "export to a new file instead (source is not touched)."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["path", "sublayers"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to an existing USD file to edit",
+                },
+                "sublayers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Non-empty list of sublayer asset path strings to "
+                        "remove (exact string match)."
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If given, export the modified layer to "
+                        "this path (must not already exist) instead of "
+                        "saving in-place. The source file is not touched."
+                    ),
                 },
             },
         },
@@ -438,6 +531,10 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_read_composition_arcs(arguments)
     if name == "usd_replace_anchors":
         return await _handle_replace_anchors(arguments)
+    if name == "usd_add_sublayers":
+        return await _handle_add_sublayers(arguments)
+    if name == "usd_remove_sublayers":
+        return await _handle_remove_sublayers(arguments)
     if name == "usd_read_cameras":
         return await _handle_read_cameras(arguments)
     if name == "usd_stitch_clips":
@@ -531,6 +628,39 @@ async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e)
+
+
+async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
+    path = arguments.get("path", "")
+    sublayers = arguments.get("sublayers")
+    position = arguments.get("position", "")
+    output_path = arguments.get("output_path") or None
+    if not path:
+        raise ValueError("[-32602] 'path' is required")
+    if not isinstance(sublayers, list):
+        raise ValueError("[-32602] 'sublayers' must be an array")
+    if not isinstance(position, str) or not position:
+        raise ValueError("[-32602] 'position' is required")
+    try:
+        result = add_sublayers(path, sublayers, position, output_path=output_path)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
+    path = arguments.get("path", "")
+    sublayers = arguments.get("sublayers")
+    output_path = arguments.get("output_path") or None
+    if not path:
+        raise ValueError("[-32602] 'path' is required")
+    if not isinstance(sublayers, list):
+        raise ValueError("[-32602] 'sublayers' must be an array")
+    try:
+        result = remove_sublayers(path, sublayers, output_path=output_path)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
 
 
 async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:

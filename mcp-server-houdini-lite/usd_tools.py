@@ -16,6 +16,8 @@ Write functions:
   write_layer_metadata           — partial update of layer metadata fields
   create_expressions_layer       — create a new USD layer containing only
                                     expressionVariables
+  add_sublayers                  — prepend or append sublayer asset paths
+  remove_sublayers               — remove sublayer asset paths by exact string
 """
 
 from pathlib import Path
@@ -818,3 +820,179 @@ def _value_to_json(value, max_elements=None):
 def _assert_exists(path: str) -> None:
     if not Path(path).exists():
         raise FileNotFoundError(f"file not found: {path}")
+
+
+def _validate_sublayers_arg(sublayers) -> list[str]:
+    if not isinstance(sublayers, list) or not sublayers:
+        raise UsdOpenError("sublayers must be a non-empty list of strings")
+    for s in sublayers:
+        if not isinstance(s, str) or not s:
+            raise UsdOpenError(
+                f"sublayers items must be non-empty strings, got {s!r}"
+            )
+    return list(sublayers)
+
+
+def _open_layer_for_write(path: str, output_path: str | None):
+    """
+    Common open + target-layer setup shared by sublayer write tools.
+
+    Returns (source_layer, target_layer). In in-place mode source == target;
+    in export mode target is an anonymous copy to avoid polluting the layer
+    cache for `path` with edits that never reach disk for that path.
+    """
+    _assert_exists(path)
+    source = Sdf.Layer.FindOrOpen(path)
+    if source is None:
+        raise UsdOpenError(f"could not open USD layer: {path}")
+
+    if output_path is not None and Path(output_path).exists():
+        raise UsdOpenError(
+            f"output_path already exists, refusing to overwrite: {output_path}"
+        )
+
+    if output_path is None:
+        if not source.permissionToEdit:
+            raise UsdOpenError(f"layer is not editable in-place: {path}")
+        return source, source
+
+    target = Sdf.Layer.CreateAnonymous()
+    target.TransferContent(source)
+    return source, target
+
+
+def _save_or_export(target, path: str, output_path: str | None) -> tuple[str, str]:
+    if output_path is None:
+        target.Save()
+        return "in_place", path
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    if not target.Export(output_path):
+        raise UsdOpenError(f"failed to export layer to: {output_path}")
+    return "export", output_path
+
+
+def add_sublayers(
+    path: str,
+    sublayers: list[str],
+    position: str,
+    output_path: str | None = None,
+) -> dict:
+    """
+    Add one or more sublayer asset paths to a USD layer's subLayerPaths.
+
+    The order of the input list is preserved. With position="prepend", the
+    first item ends up at index 0 (strongest), so `final = sublayers + existing`.
+    With position="append", `final = existing + sublayers`.
+
+    Entries whose string is already present in subLayerPaths are skipped
+    (no-op), and reported in `skipped`. Internal duplicates within `sublayers`
+    are treated the same way — only the first occurrence is added.
+
+    Anonymous layer identifiers (starting with "anon:") are rejected — USD
+    does not allow writing them into a saved layer.
+
+    If `output_path` is None, the file is saved in-place. Otherwise the layer
+    is exported to a new file (must not exist), with format inferred from the
+    extension; the source file is not touched.
+
+    Raises:
+        FileNotFoundError — source file does not exist
+        UsdOpenError      — invalid arguments, layer not editable, or write fails
+    """
+    to_add = _validate_sublayers_arg(sublayers)
+    if position not in ("prepend", "append"):
+        raise UsdOpenError(
+            f"position must be 'prepend' or 'append', got {position!r}"
+        )
+    for s in to_add:
+        if s.startswith("anon:"):
+            raise UsdOpenError(
+                f"refusing to add anonymous layer identifier: {s!r}"
+            )
+
+    _, target = _open_layer_for_write(path, output_path)
+
+    existing = list(target.subLayerPaths)
+    added: list[str] = []
+    skipped: list[str] = []
+    seen = set(existing)
+    for s in to_add:
+        if s in seen:
+            skipped.append(s)
+        else:
+            added.append(s)
+            seen.add(s)
+
+    if added:
+        with Sdf.ChangeBlock():
+            if position == "prepend":
+                for i, s in enumerate(added):
+                    target.subLayerPaths.insert(i, s)
+            else:
+                for s in added:
+                    target.subLayerPaths.append(s)
+
+    mode, out = _save_or_export(target, path, output_path)
+
+    return {
+        "path":            path,
+        "output_path":     out,
+        "mode":            mode,
+        "position":        position,
+        "added":           added,
+        "skipped":         skipped,
+        "final_sublayers": list(target.subLayerPaths),
+    }
+
+
+def remove_sublayers(
+    path: str,
+    sublayers: list[str],
+    output_path: str | None = None,
+) -> dict:
+    """
+    Remove one or more sublayer asset paths from a USD layer's subLayerPaths.
+
+    Matches the exact stored strings (same strings returned by
+    read_composition_arcs). Entries not found in subLayerPaths are silently
+    skipped and reported in `not_found`.
+
+    If `output_path` is None, the file is saved in-place. Otherwise the layer
+    is exported to a new file (must not exist); the source file is not touched.
+
+    Raises:
+        FileNotFoundError — source file does not exist
+        UsdOpenError      — invalid arguments, layer not editable, or write fails
+    """
+    to_remove = _validate_sublayers_arg(sublayers)
+
+    _, target = _open_layer_for_write(path, output_path)
+
+    existing = list(target.subLayerPaths)
+    removed: list[str] = []
+    not_found: list[str] = []
+    to_remove_set: set[str] = set()
+    for s in to_remove:
+        if s in to_remove_set:
+            continue
+        to_remove_set.add(s)
+        if s in existing:
+            removed.append(s)
+        else:
+            not_found.append(s)
+
+    if removed:
+        with Sdf.ChangeBlock():
+            for s in removed:
+                target.subLayerPaths.remove(s)
+
+    mode, out = _save_or_export(target, path, output_path)
+
+    return {
+        "path":            path,
+        "output_path":     out,
+        "mode":            mode,
+        "removed":         removed,
+        "not_found":       not_found,
+        "final_sublayers": list(target.subLayerPaths),
+    }
