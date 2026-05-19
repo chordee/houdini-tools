@@ -29,7 +29,7 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **camera lens & projection attributes** → `usd_read_cameras`
 - **attribute names/types on a prim** → `usd_read_prim_attributes`
 - **value of one named attribute** → `usd_read_attribute_value`
-- **customLayerData only** → `usd_read_layer_metadata`
+- **all standard layer metadata (time codes, fps, units, axis, customLayerData, expressionVariables)** → `usd_read_layer_metadata`
 
 ### USD write (creates or modifies files on disk)
 
@@ -37,6 +37,8 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **stitch per-frame .bgeo.sc files into a USD Value Clips stage** → `bgeo_stitch_usd_clips`
 - **stitch per-frame .vdb files into a USD Volume** → `vdb_stitch_volume_usd` (under VDB above; note this builds a UsdVol.Volume with time-sampled OpenVDBAsset.filePath, **not** USD Value Clips — clips don't apply to volumes)
 - **batch-replace anchor asset paths in a single layer** → `usd_replace_anchors`
+- **edit layer metadata (set / clear / overwrite, in-place or save-as)** → `usd_write_layer_metadata`
+- **create a fresh USD layer holding only Variable Expressions** → `usd_create_expressions_layer`
 
 ## Behavioral Rules
 
@@ -45,6 +47,8 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **`usd_replace_anchors`** does pure string replacement on `assetPath`; `primPath`, `layerOffset`, and `customData` are preserved. Keys in the `replacements` map must match the stored strings character-for-character — call `usd_read_composition_arcs` first to capture them.
 - **Prims inside payloads** are not visible to `usd_read_prim_attributes` / `usd_read_attribute_value` unless `load_payloads: true` is passed.
 - **`bgeo_list_sequence` and `vdb_list_sequence` auto-group** by base name. A directory with several coexisting sequences returns each one separately in `sequences[]`; files whose frame number cannot be parsed go to `unmatched[]`.
+- **`usd_write_layer_metadata`** only touches fields listed in `metadata`; dict-valued fields (`customLayerData` / `expressionVariables`) are **fully replaced**, not merged. To merge, read first then write the merged dict. A field value of `null` clears it back to unauthored.
+- **`expressionVariables`** value types are stricter than `customLayerData`: only `str`, `bool`, `int`, or a homogeneous list of those. No `float`, no nested dict, no mixed-type list.
 
 ## Workflows
 

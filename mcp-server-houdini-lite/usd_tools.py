@@ -1,8 +1,8 @@
 """
-usd_tools.py — USD file inspection utilities
+usd_tools.py — USD file inspection and authoring utilities
 
 Read-only functions for inspecting USD files without loading geometry:
-  read_layer_metadata       — customLayerData from a single layer (no composition)
+  read_layer_metadata       — full layer metadata (custom, time, units, vars)
   read_layer_hierarchy      — prim hierarchy from a single layer (no composition)
   read_composed_hierarchy   — full composed hierarchy (refs/sublayers resolved,
                                payloads deferred)
@@ -11,6 +11,11 @@ Read-only functions for inspecting USD files without loading geometry:
   read_cameras              — all Camera prims with lens/projection attributes
   read_prim_attributes      — attribute names/types/time-sample info on a prim
   read_attribute_value      — value of a single named attribute on a prim
+
+Write functions:
+  write_layer_metadata           — partial update of layer metadata fields
+  create_expressions_layer       — create a new USD layer containing only
+                                    expressionVariables
 """
 
 from pathlib import Path
@@ -39,14 +44,55 @@ class UsdOpenError(Exception):
 # Public functions
 # ---------------------------------------------------------------------------
 
+
+# Layer metadata fields supported by read_layer_metadata / write_layer_metadata.
+# Each entry maps a JSON key to ("kind", spec) where kind is one of:
+#   "first_class" — uses HasXxx() / SetXxx() / ClearXxx() methods on Sdf.Layer
+#   "generic"     — stored at the pseudo-root via GetField/SetField/EraseField
+_LAYER_METADATA_SPEC = {
+    "defaultPrim":         ("first_class", "DefaultPrim"),
+    "startTimeCode":       ("first_class", "StartTimeCode"),
+    "endTimeCode":         ("first_class", "EndTimeCode"),
+    "framesPerSecond":     ("first_class", "FramesPerSecond"),
+    "timeCodesPerSecond":  ("first_class", "TimeCodesPerSecond"),
+    "customLayerData":     ("first_class", "CustomLayerData"),
+    "expressionVariables": ("first_class", "ExpressionVariables"),
+    "upAxis":              ("generic",     "upAxis"),
+    "metersPerUnit":       ("generic",     "metersPerUnit"),
+}
+
+
+def _read_first_class(layer, suffix):
+    if not getattr(layer, f"Has{suffix}")():
+        return None
+    attr_name = suffix[0].lower() + suffix[1:]
+    value = getattr(layer, attr_name)
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)  # TfToken / Sdf.Path → str
+
+
+def _read_generic(layer, field_name):
+    spec = layer.pseudoRoot
+    if not spec.HasInfo(field_name):
+        return None
+    return spec.GetInfo(field_name)
+
+
 def read_layer_metadata(path: str) -> dict:
     """
-    Read customLayerData from a single USD layer without composition.
+    Read layer-level metadata from a single USD layer without composition.
 
     Returns a dict with keys:
         path            — input file path
         format          — file format id (e.g. "usda", "usdc", "usd")
-        customLayerData — the layer's customLayerData dict (may be empty)
+        plus one key per supported metadata field (defaultPrim, startTimeCode,
+        endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis,
+        customLayerData, expressionVariables). A field that has not been authored
+        in the file reports value `None` (distinguishing "unauthored" from a
+        legitimate authored zero / empty value).
 
     Raises:
         FileNotFoundError  — file does not exist
@@ -57,10 +103,212 @@ def read_layer_metadata(path: str) -> dict:
     if layer is None:
         raise UsdOpenError(f"could not open USD layer: {path}")
 
-    return {
+    result = {
         "path": path,
         "format": layer.GetFileFormat().formatId,
-        "customLayerData": dict(layer.customLayerData),
+    }
+    for key, (kind, spec) in _LAYER_METADATA_SPEC.items():
+        if kind == "first_class":
+            result[key] = _read_first_class(layer, spec)
+        else:
+            result[key] = _read_generic(layer, spec)
+    return result
+
+
+# Allowed leaf value types for expressionVariables (per OpenUSD docs).
+# Bool must be checked before int (bool is a subclass of int in Python).
+def _is_valid_expr_var_value(v):
+    if isinstance(v, bool):
+        return True
+    if isinstance(v, int):
+        return True
+    if isinstance(v, str):
+        return True
+    if isinstance(v, list):
+        if not v:
+            return True  # empty list is fine
+        first = v[0]
+        if isinstance(first, bool):
+            return all(isinstance(x, bool) for x in v)
+        if isinstance(first, int):
+            return all(isinstance(x, int) and not isinstance(x, bool) for x in v)
+        if isinstance(first, str):
+            return all(isinstance(x, str) for x in v)
+        return False
+    return False
+
+
+def _validate_expression_variables(value):
+    if not isinstance(value, dict):
+        raise UsdOpenError(
+            f"expressionVariables must be a dict, got {type(value).__name__}"
+        )
+    for k, v in value.items():
+        if not isinstance(k, str):
+            raise UsdOpenError(
+                f"expressionVariables keys must be strings, got {type(k).__name__}"
+            )
+        if not _is_valid_expr_var_value(v):
+            raise UsdOpenError(
+                f"expressionVariables[{k!r}] has unsupported value/type "
+                f"{v!r} ({type(v).__name__}); allowed: str, bool, int, "
+                f"or homogeneous list of those"
+            )
+
+
+def _write_first_class(layer, suffix, value):
+    if value is None:
+        getattr(layer, f"Clear{suffix}")()
+        return
+    if suffix == "ExpressionVariables":
+        _validate_expression_variables(value)
+    elif suffix == "CustomLayerData":
+        if not isinstance(value, dict):
+            raise UsdOpenError(
+                f"customLayerData must be a dict, got {type(value).__name__}"
+            )
+    attr_name = suffix[0].lower() + suffix[1:]
+    setattr(layer, attr_name, value)
+
+
+def _write_generic(layer, field_name, value):
+    spec = layer.pseudoRoot
+    if value is None:
+        spec.ClearInfo(field_name)
+    else:
+        spec.SetInfo(field_name, value)
+
+
+def write_layer_metadata(
+    path: str,
+    metadata: dict,
+    output_path: str | None = None,
+) -> dict:
+    """
+    Update layer-level metadata on a USD layer.
+
+    Only fields present in `metadata` are touched. A field value of None means
+    "clear back to unauthored". Dict-valued fields (customLayerData /
+    expressionVariables) are fully replaced; to merge, read first and pass the
+    merged result.
+
+    If `output_path` is None, the file is saved in-place (mode = "in_place").
+    If `output_path` is provided, the layer is exported to a new file (mode =
+    "export") and the source file is not touched; `output_path` must not exist
+    already.
+
+    Returns a dict describing what was applied.
+
+    Raises:
+        FileNotFoundError — source file does not exist
+        UsdOpenError      — file could not be opened, is read-only, has an
+                            unknown field name, or fails value validation
+    """
+    if not isinstance(metadata, dict):
+        raise UsdOpenError(
+            f"metadata must be a dict, got {type(metadata).__name__}"
+        )
+
+    unknown = [k for k in metadata if k not in _LAYER_METADATA_SPEC]
+    if unknown:
+        raise UsdOpenError(
+            f"unknown metadata field(s): {unknown}; "
+            f"allowed: {sorted(_LAYER_METADATA_SPEC.keys())}"
+        )
+
+    _assert_exists(path)
+    source = Sdf.Layer.FindOrOpen(path)
+    if source is None:
+        raise UsdOpenError(f"could not open USD layer: {path}")
+
+    if output_path is not None and Path(output_path).exists():
+        raise UsdOpenError(
+            f"output_path already exists, refusing to overwrite: {output_path}"
+        )
+
+    # In-place mode mutates the cached source layer; export mode works on an
+    # anonymous copy so the layer cache for `path` is not polluted with edits
+    # that never reach disk for that path.
+    if output_path is None:
+        if not source.permissionToEdit:
+            raise UsdOpenError(f"layer is not editable in-place: {path}")
+        target = source
+    else:
+        target = Sdf.Layer.CreateAnonymous()
+        target.TransferContent(source)
+
+    applied = []
+    for key, value in metadata.items():
+        kind, spec = _LAYER_METADATA_SPEC[key]
+        if kind == "first_class":
+            _write_first_class(target, spec, value)
+        else:
+            _write_generic(target, spec, value)
+        applied.append({
+            "field":  key,
+            "action": "clear" if value is None else "set",
+            **({} if value is None else {"new": value}),
+        })
+
+    if output_path is None:
+        target.Save()
+        mode = "in_place"
+        out = path
+    else:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        if not target.Export(output_path):
+            raise UsdOpenError(f"failed to export layer to: {output_path}")
+        mode = "export"
+        out = output_path
+
+    return {
+        "path":        path,
+        "output_path": out,
+        "mode":        mode,
+        "applied":     applied,
+    }
+
+
+def create_expressions_layer(
+    output_path: str,
+    expression_variables: dict,
+) -> dict:
+    """
+    Create a new USD layer at output_path containing only the given
+    expressionVariables metadata (no prims, no other layer metadata).
+
+    The file format is inferred from output_path's extension (.usd / .usda /
+    .usdc). output_path must not exist.
+
+    Raises:
+        UsdOpenError — output_path exists, expression_variables is empty or
+                       contains unsupported value types, or layer creation
+                       fails.
+    """
+    if not isinstance(expression_variables, dict) or not expression_variables:
+        raise UsdOpenError(
+            "expression_variables must be a non-empty dict"
+        )
+    _validate_expression_variables(expression_variables)
+
+    out = Path(output_path)
+    if out.exists():
+        raise UsdOpenError(
+            f"output_path already exists, refusing to overwrite: {output_path}"
+        )
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    layer = Sdf.Layer.CreateNew(output_path)
+    if layer is None:
+        raise UsdOpenError(f"could not create USD layer: {output_path}")
+
+    layer.expressionVariables = expression_variables
+    layer.Save()
+
+    return {
+        "status":               "ok",
+        "output_path":          output_path,
+        "expression_variables": dict(expression_variables),
     }
 
 
