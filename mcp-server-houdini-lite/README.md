@@ -239,7 +239,7 @@ Per-sequence `frames` is always fully populated (length equal to `frame_count`);
 
 #### `usd_read_layer_metadata`
 
-Reads `customLayerData` from a single USD layer without composition.
+Reads **all standard layer-level metadata** from a single USD layer without composition: `defaultPrim`, `startTimeCode`, `endTimeCode`, `framesPerSecond`, `timeCodesPerSecond`, `metersPerUnit`, `upAxis`, `customLayerData`, and `expressionVariables`. Any field that has not been authored in the file is reported as `null` — this distinguishes "unauthored" from an authored zero or empty value.
 
 **Input**
 
@@ -253,10 +253,77 @@ Reads `customLayerData` from a single USD layer without composition.
 {
   "path": "/path/to/file.usda",
   "format": "usda",
-  "customLayerData": {
-    "author": "chordee",
-    "project": "my_project"
-  }
+  "defaultPrim": "torus1",
+  "startTimeCode": 1.0,
+  "endTimeCode": 240.0,
+  "framesPerSecond": 24.0,
+  "timeCodesPerSecond": 24.0,
+  "metersPerUnit": 1.0,
+  "upAxis": "Y",
+  "customLayerData": { "author": "chordee", "project": "my_project" },
+  "expressionVariables": { "PROJECT": "demo", "SHOT": "010", "TAKE": 3 }
+}
+```
+
+---
+
+#### `usd_write_layer_metadata`
+
+Updates layer-level metadata on a USD layer. **Only fields present in `metadata` are touched**; unmentioned fields are left as-is. A field value of `null` clears the field back to its unauthored state. Dict-valued fields (`customLayerData` / `expressionVariables`) are **fully replaced** — to merge, read first and pass the merged dict. **This tool writes files to disk.**
+
+By default the file is saved in-place. Pass `output_path` to export to a new file instead (source is not touched, and the extension determines format — so this can also convert `.usda` ↔ `.usdc`).
+
+**`expressionVariables` value-type restriction**: only `string`, `bool`, `int`, or homogeneous list of those. `float`, nested `dict`, and mixed lists are rejected (per OpenUSD Variable Expressions spec).
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to an existing USD file to edit |
+| `metadata` | object | yes | Map of metadata field name to new value. `null` clears the field. |
+| `output_path` | string | no | If given, export to this path (must not exist) instead of saving in-place |
+
+Allowed `metadata` fields: `defaultPrim`, `startTimeCode`, `endTimeCode`, `framesPerSecond`, `timeCodesPerSecond`, `metersPerUnit`, `upAxis`, `customLayerData`, `expressionVariables`.
+
+**Output** (JSON)
+
+```json
+{
+  "path":        "/path/to/file.usda",
+  "output_path": "/path/to/file.usda",
+  "mode":        "in_place",
+  "applied": [
+    { "field": "framesPerSecond",     "action": "set",   "new": 30.0 },
+    { "field": "endTimeCode",         "action": "clear" },
+    { "field": "expressionVariables", "action": "set",   "new": { "shot": "010" } }
+  ]
+}
+```
+
+`mode` is `"in_place"` or `"export"`; `output_path` equals `path` in in-place mode.
+
+---
+
+#### `usd_create_expressions_layer`
+
+Creates a new USD layer at `output_path` containing **only** the given `expressionVariables` metadata (no prims, no other layer metadata). Useful for pipeline config layers that are sublayered or referenced by other USDs to inject variables. **This tool writes files to disk.**
+
+`expression_variables` values are restricted to the same set as `usd_write_layer_metadata` (`str` / `bool` / `int` / homogeneous list of those). `output_path` must not already exist; file format is determined by the extension (`.usd` / `.usda` / `.usdc`).
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `output_path` | string | yes | Absolute path to the new USD layer (must not exist) |
+| `expression_variables` | object | yes | Non-empty dict of variable name to value |
+
+**Output** (JSON)
+
+```json
+{
+  "status": "ok",
+  "output_path": "/abs/path/to/vars.usda",
+  "expression_variables": { "PROJECT": "demo", "SHOT": "010", "TAKE": 3 }
 }
 ```
 
