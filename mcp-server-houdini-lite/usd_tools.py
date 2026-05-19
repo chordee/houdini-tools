@@ -217,25 +217,33 @@ def write_layer_metadata(
         )
 
     _assert_exists(path)
-    layer = Sdf.Layer.FindOrOpen(path)
-    if layer is None:
+    source = Sdf.Layer.FindOrOpen(path)
+    if source is None:
         raise UsdOpenError(f"could not open USD layer: {path}")
-
-    if output_path is None and not layer.permissionToEdit:
-        raise UsdOpenError(f"layer is not editable in-place: {path}")
 
     if output_path is not None and Path(output_path).exists():
         raise UsdOpenError(
             f"output_path already exists, refusing to overwrite: {output_path}"
         )
 
+    # In-place mode mutates the cached source layer; export mode works on an
+    # anonymous copy so the layer cache for `path` is not polluted with edits
+    # that never reach disk for that path.
+    if output_path is None:
+        if not source.permissionToEdit:
+            raise UsdOpenError(f"layer is not editable in-place: {path}")
+        target = source
+    else:
+        target = Sdf.Layer.CreateAnonymous()
+        target.TransferContent(source)
+
     applied = []
     for key, value in metadata.items():
         kind, spec = _LAYER_METADATA_SPEC[key]
         if kind == "first_class":
-            _write_first_class(layer, spec, value)
+            _write_first_class(target, spec, value)
         else:
-            _write_generic(layer, spec, value)
+            _write_generic(target, spec, value)
         applied.append({
             "field":  key,
             "action": "clear" if value is None else "set",
@@ -243,12 +251,12 @@ def write_layer_metadata(
         })
 
     if output_path is None:
-        layer.Save()
+        target.Save()
         mode = "in_place"
         out = path
     else:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        if not layer.Export(output_path):
+        if not target.Export(output_path):
             raise UsdOpenError(f"failed to export layer to: {output_path}")
         mode = "export"
         out = output_path

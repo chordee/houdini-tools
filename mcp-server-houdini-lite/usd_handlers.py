@@ -464,7 +464,7 @@ async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent
 async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
     path = arguments.get("path", "")
     metadata = arguments.get("metadata")
-    output_path = arguments.get("output_path")
+    output_path = arguments.get("output_path") or None  # treat "" as not provided
     if not path:
         raise ValueError("[-32602] 'path' is required")
     if not isinstance(metadata, dict):
@@ -473,7 +473,7 @@ async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextConten
         result = write_layer_metadata(path, metadata, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextContent]:
@@ -487,7 +487,7 @@ async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextCo
         result = create_expressions_layer(output_path, expression_variables)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
