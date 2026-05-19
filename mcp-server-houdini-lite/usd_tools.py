@@ -984,7 +984,9 @@ def remove_sublayers(
     if removed:
         with Sdf.ChangeBlock():
             for s in removed:
-                target.subLayerPaths.remove(s)
+                # subLayerPaths may legitimately contain duplicates; clear all
+                while s in target.subLayerPaths:
+                    target.subLayerPaths.remove(s)
 
     mode, out = _save_or_export(target, path, output_path)
 
