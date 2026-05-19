@@ -598,6 +598,77 @@ The `replacements` map is applied as-is — the tool performs a pure string subs
 
 ---
 
+#### `usd_add_sublayers`
+
+Adds one or more sublayer asset paths to a USD layer's `subLayerPaths` list. **This tool writes files to disk.**
+
+USD `subLayerPaths` is **strongest-first**:
+
+- `position: "prepend"` puts new entries at the top — for input `["A","B","C"]` the final list is `["A","B","C", ...existing]`, so `A` becomes the strongest.
+- `position: "append"` puts them at the bottom — final `= [...existing, "A","B","C"]`, with `A` stronger than `B` and `C` but all weaker than the existing entries.
+
+Entries whose string is already present in `subLayerPaths` are skipped (no-op) and reported in `skipped` — including duplicates within the input list itself. Anonymous layer identifiers (strings starting with `anon:`) are rejected.
+
+By default the file is saved in-place. Pass `output_path` to export to a new file instead (source is not touched; extension decides format).
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to an existing USD file to edit |
+| `sublayers` | string[] | yes | Non-empty list of sublayer asset path strings to add (stored as-is) |
+| `position` | string | yes | `"prepend"` (strongest first) or `"append"` (weakest last) |
+| `output_path` | string | no | If given, export to this path (must not exist) instead of saving in-place |
+
+**Output** (JSON)
+
+```json
+{
+  "path":        "/path/to/main.usd",
+  "output_path": "/path/to/main.usd",
+  "mode":        "in_place",
+  "position":    "prepend",
+  "added":       ["./vars.usda", "./override.usda"],
+  "skipped":     [],
+  "final_sublayers": ["./vars.usda", "./override.usda", "./existing.usda"]
+}
+```
+
+`final_sublayers` is the complete `subLayerPaths` list after the write (strongest-first).
+
+---
+
+#### `usd_remove_sublayers`
+
+Removes one or more sublayer asset paths from a USD layer's `subLayerPaths` list. Matches the exact stored strings — same strings returned by `usd_read_composition_arcs`. **This tool writes files to disk.**
+
+Entries not found in `subLayerPaths` are silently skipped and reported in `not_found` — no error is raised, so a single call can mix existing and possibly-existing entries without aborting.
+
+By default the file is saved in-place. Pass `output_path` to export to a new file instead.
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to an existing USD file to edit |
+| `sublayers` | string[] | yes | Non-empty list of sublayer asset path strings to remove (exact match) |
+| `output_path` | string | no | If given, export to this path (must not exist) instead of saving in-place |
+
+**Output** (JSON)
+
+```json
+{
+  "path":        "/path/to/main.usd",
+  "output_path": "/path/to/main.usd",
+  "mode":        "in_place",
+  "removed":     ["./override.usda"],
+  "not_found":   ["./temp.usda"],
+  "final_sublayers": ["./existing.usda"]
+}
+```
+
+---
+
 #### `usd_stitch_clips`
 
 Stitches per-frame USD cache files into a single USD Value Clips stage. Automatically generates `topology.usd` and `manifest.usd` alongside the output. **This tool writes files to disk.**
