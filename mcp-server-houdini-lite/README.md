@@ -638,6 +638,49 @@ By default the file is saved in-place. Pass `output_path` to export to a new fil
 
 ---
 
+#### `usd_insert_sublayers`
+
+Inserts one or more sublayer asset paths at an explicit position in a USD layer's `subLayerPaths`. Use this when `prepend` / `append` aren't enough — e.g. you need a new layer to sit between two existing entries. **This tool writes files to disk.**
+
+`index` is 0-based against the current `subLayerPaths` length:
+
+- `index = 0` → top (strongest, equivalent to `usd_add_sublayers` with `position: "prepend"`)
+- `index = len(existing)` → bottom (weakest, equivalent to `position: "append"`)
+- `0 < index < len(existing)` → between existing entries
+
+Values outside `[0, len(existing)]` — including **any negative value** — raise. There is no Python-style negative indexing.
+
+Multiple entries inserted at index `i` preserve input order: they land at indices `i`, `i+1`, `i+2`, ... and entries originally at `i` and beyond shift down. So inserting `["A","B","C"]` at index 1 of `["X","Y","Z"]` produces `["X","A","B","C","Y","Z"]`.
+
+Same dedup behavior as `usd_add_sublayers`: strings already present are skipped (`skipped`), and `anon:` identifiers are rejected.
+
+By default the file is saved in-place. Pass `output_path` to export to a new file instead.
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to an existing USD file to edit |
+| `sublayers` | string[] | yes | Non-empty list of sublayer asset path strings to insert |
+| `index` | integer | yes | 0-based insertion position in `[0, len(existing)]` inclusive |
+| `output_path` | string | no | If given, export to this path (must not exist) instead of saving in-place |
+
+**Output** (JSON)
+
+```json
+{
+  "path":        "/path/to/main.usd",
+  "output_path": "/path/to/main.usd",
+  "mode":        "in_place",
+  "index":       1,
+  "added":       ["./middle.usda"],
+  "skipped":     [],
+  "final_sublayers": ["./top.usda", "./middle.usda", "./bottom.usda"]
+}
+```
+
+---
+
 #### `usd_remove_sublayers`
 
 Removes one or more sublayer asset paths from a USD layer's `subLayerPaths` list. Matches the exact stored strings — same strings returned by `usd_read_composition_arcs`. **This tool writes files to disk.**

@@ -17,6 +17,7 @@ Write functions:
   create_expressions_layer       — create a new USD layer containing only
                                     expressionVariables
   add_sublayers                  — prepend or append sublayer asset paths
+  insert_sublayers               — insert sublayer asset paths at an explicit index
   remove_sublayers               — remove sublayer asset paths by exact string
 """
 
@@ -939,6 +940,85 @@ def add_sublayers(
         "output_path":     out,
         "mode":            mode,
         "position":        position,
+        "added":           added,
+        "skipped":         skipped,
+        "final_sublayers": list(target.subLayerPaths),
+    }
+
+
+def insert_sublayers(
+    path: str,
+    sublayers: list[str],
+    index: int,
+    output_path: str | None = None,
+) -> dict:
+    """
+    Insert one or more sublayer asset paths at an explicit position in a USD
+    layer's subLayerPaths.
+
+    `index` is 0-based against the existing subLayerPaths length. `index=0`
+    inserts at the top (strongest, equivalent to add_sublayers prepend);
+    `index=len(existing)` inserts at the bottom (weakest, equivalent to
+    append). Values outside `[0, len(existing)]` — including any negative
+    value — raise UsdOpenError.
+
+    When multiple sublayers are inserted at index i, input order is preserved:
+    new entries occupy indices i, i+1, i+2, ... and the entry originally at
+    index i shifts down accordingly.
+
+    Entries whose string is already present in subLayerPaths are skipped
+    (no-op) and reported in `skipped`. Internal duplicates within `sublayers`
+    are deduplicated the same way. Anonymous identifiers (starting with
+    "anon:") are rejected.
+
+    If `output_path` is None, the file is saved in-place; otherwise the layer
+    is exported to a new file (must not exist), source untouched.
+
+    Raises:
+        FileNotFoundError — source file does not exist
+        UsdOpenError      — invalid arguments, layer not editable, or write fails
+    """
+    to_add = _validate_sublayers_arg(sublayers)
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise UsdOpenError(
+            f"index must be a non-negative integer, got {index!r}"
+        )
+    for s in to_add:
+        if s.startswith("anon:"):
+            raise UsdOpenError(
+                f"refusing to add anonymous layer identifier: {s!r}"
+            )
+
+    _, target = _open_layer_for_write(path, output_path)
+
+    existing_len = len(target.subLayerPaths)
+    if index < 0 or index > existing_len:
+        raise UsdOpenError(
+            f"index out of range: {index} (must be 0..{existing_len} inclusive)"
+        )
+
+    seen = set(target.subLayerPaths)
+    added: list[str] = []
+    skipped: list[str] = []
+    for s in to_add:
+        if s in seen:
+            skipped.append(s)
+        else:
+            added.append(s)
+            seen.add(s)
+
+    if added:
+        with Sdf.ChangeBlock():
+            for j, s in enumerate(added):
+                target.subLayerPaths.insert(index + j, s)
+
+    mode, out = _save_or_export(target, path, output_path)
+
+    return {
+        "path":            path,
+        "output_path":     out,
+        "mode":            mode,
+        "index":           index,
         "added":           added,
         "skipped":         skipped,
         "final_sublayers": list(target.subLayerPaths),

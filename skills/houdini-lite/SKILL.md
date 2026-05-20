@@ -1,6 +1,6 @@
 ---
 name: houdini-lite
-description: Inspect Houdini bgeo.sc geometry caches, OpenVDB volume caches, and USD scene files using MCP tools, without loading full geometry into memory. Use when the user needs to read cache metadata, VDB grid lists, attribute info, frame sequences, USD hierarchy, composition arcs, cameras, replace anchors, add or remove sublayers, or stitch USD value clips.
+description: Inspect Houdini bgeo.sc geometry caches, OpenVDB volume caches, and USD scene files using MCP tools, without loading full geometry into memory. Use when the user needs to read cache metadata, VDB grid lists, attribute info, frame sequences, USD hierarchy, composition arcs, cameras, replace anchors, add / insert / remove sublayers, or stitch USD value clips.
 ---
 
 # Houdini Lite Expert
@@ -38,6 +38,7 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **stitch per-frame .vdb files into a USD Volume** → `vdb_stitch_volume_usd` (under VDB above; note this builds a UsdVol.Volume with time-sampled OpenVDBAsset.filePath, **not** USD Value Clips — clips don't apply to volumes)
 - **batch-replace anchor asset paths in a single layer** → `usd_replace_anchors`
 - **add sublayers to a layer (prepend = strongest / append = weakest)** → `usd_add_sublayers`
+- **insert sublayers at an explicit 0-based index (between existing entries)** → `usd_insert_sublayers`
 - **remove sublayers from a layer (exact string match)** → `usd_remove_sublayers`
 - **edit layer metadata (set / clear / overwrite, in-place or save-as)** → `usd_write_layer_metadata`
 - **create a fresh USD layer holding only Variable Expressions** → `usd_create_expressions_layer`
@@ -52,6 +53,7 @@ MCP tools for inspecting `.bgeo.sc` geometry caches and USD scene files, plus a 
 - **`usd_write_layer_metadata`** only touches fields listed in `metadata`; dict-valued fields (`customLayerData` / `expressionVariables`) are **fully replaced**, not merged. To merge, read first then write the merged dict. A field value of `null` clears it back to unauthored.
 - **`expressionVariables`** value types are stricter than `customLayerData`: only `str`, `bool`, `int`, or a homogeneous list of those. No `float`, no nested dict, no mixed-type list.
 - **`usd_add_sublayers` / `usd_remove_sublayers`** match `subLayerPaths` strings **exactly** — call `usd_read_composition_arcs` first to capture them. Strength = list order: `prepend ["A","B","C"]` puts `A` strongest at the top, `append` puts the input list at the bottom (weakest). Re-adding an existing string is a no-op (`skipped`); removing a string that isn't there is a no-op (`not_found`). Neither raises for these cases.
+- **`usd_insert_sublayers`** is for putting entries between existing ones — `index = 0` matches `prepend`, `index = len(existing)` matches `append`, anything in between inserts there. **No negative indexing**; out-of-range values raise. Multiple entries keep input order at the insertion point.
 
 ## Workflows
 

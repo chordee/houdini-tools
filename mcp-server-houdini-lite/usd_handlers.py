@@ -10,6 +10,7 @@ from usd_tools import (
     UsdOpenError,
     add_sublayers,
     create_expressions_layer,
+    insert_sublayers,
     read_layer_metadata,
     read_layer_hierarchy,
     read_composed_hierarchy,
@@ -255,6 +256,55 @@ TOOLS = [
                         "'prepend' = insert at the top of subLayerPaths "
                         "(strongest); 'append' = insert at the bottom "
                         "(weakest)."
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If given, export the modified layer to "
+                        "this path (must not already exist) instead of "
+                        "saving in-place. The source file is not touched."
+                    ),
+                },
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_insert_sublayers",
+        description=(
+            "Insert one or more sublayer asset paths at an explicit position "
+            "in a USD layer's subLayerPaths. 'index' is 0-based against the "
+            "current list length: 0 = top (strongest, same as "
+            "usd_add_sublayers prepend), len(existing) = bottom (weakest, "
+            "same as append). Values outside [0, len] — including negatives "
+            "— raise. Multiple entries inserted at index i preserve input "
+            "order and land at i, i+1, i+2, ... Same dedup and anonymous-"
+            "identifier rejection as usd_add_sublayers. By default saves in-"
+            "place; pass 'output_path' to export to a new file instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["path", "sublayers", "index"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to an existing USD file to edit",
+                },
+                "sublayers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Non-empty list of sublayer asset path strings to "
+                        "insert (stored as-is)."
+                    ),
+                },
+                "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": (
+                        "0-based insertion index. Must be in "
+                        "[0, len(existing_subLayerPaths)] inclusive."
                     ),
                 },
                 "output_path": {
@@ -533,6 +583,8 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_replace_anchors(arguments)
     if name == "usd_add_sublayers":
         return await _handle_add_sublayers(arguments)
+    if name == "usd_insert_sublayers":
+        return await _handle_insert_sublayers(arguments)
     if name == "usd_remove_sublayers":
         return await _handle_remove_sublayers(arguments)
     if name == "usd_read_cameras":
@@ -550,7 +602,7 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
 # ---------------------------------------------------------------------------
 
 async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     try:
         result = read_layer_metadata(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -559,11 +611,9 @@ async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent
 
 
 async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     metadata = arguments.get("metadata")
-    output_path = arguments.get("output_path") or None  # treat "" as not provided
-    if not path:
-        raise ValueError("[-32602] 'path' is required")
+    output_path = _optional_str(arguments, "output_path")
     if not isinstance(metadata, dict):
         raise ValueError("[-32602] 'metadata' must be an object")
     try:
@@ -574,10 +624,8 @@ async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextConten
 
 
 async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextContent]:
-    output_path = arguments.get("output_path", "")
+    output_path = _require_str(arguments, "output_path")
     expression_variables = arguments.get("expression_variables")
-    if not output_path:
-        raise ValueError("[-32602] 'output_path' is required")
     if not isinstance(expression_variables, dict):
         raise ValueError("[-32602] 'expression_variables' must be an object")
     try:
@@ -588,7 +636,7 @@ async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextCo
 
 
 async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     max_depth = int(arguments.get("max_depth", 0))
     try:
         result = read_layer_hierarchy(path, max_depth=max_depth)
@@ -598,7 +646,7 @@ async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
 
 
 async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     max_depth = int(arguments.get("max_depth", 0))
     try:
         result = read_composed_hierarchy(path, max_depth=max_depth)
@@ -608,7 +656,7 @@ async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextCon
 
 
 async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     try:
         result = read_composition_arcs(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -617,7 +665,7 @@ async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextConte
 
 
 async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     replacements = arguments.get("replacements")
     if replacements is None:
         replacements = {}
@@ -631,16 +679,12 @@ async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
 
 
 async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     sublayers = arguments.get("sublayers")
-    position = arguments.get("position", "")
-    output_path = arguments.get("output_path") or None
-    if not path:
-        raise ValueError("[-32602] 'path' is required")
+    position = _require_str(arguments, "position")
+    output_path = _optional_str(arguments, "output_path")
     if not isinstance(sublayers, list):
         raise ValueError("[-32602] 'sublayers' must be an array")
-    if not isinstance(position, str) or not position:
-        raise ValueError("[-32602] 'position' is required")
     try:
         result = add_sublayers(path, sublayers, position, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -648,12 +692,26 @@ async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
         raise _usd_error(e) from e
 
 
-async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+async def _handle_insert_sublayers(arguments: dict) -> list[types.TextContent]:
+    path = _require_str(arguments, "path")
     sublayers = arguments.get("sublayers")
-    output_path = arguments.get("output_path") or None
-    if not path:
-        raise ValueError("[-32602] 'path' is required")
+    index = arguments.get("index")
+    output_path = _optional_str(arguments, "output_path")
+    if not isinstance(sublayers, list):
+        raise ValueError("[-32602] 'sublayers' must be an array")
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise ValueError("[-32602] 'index' must be an integer")
+    try:
+        result = insert_sublayers(path, sublayers, index, output_path=output_path)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
+    path = _require_str(arguments, "path")
+    sublayers = arguments.get("sublayers")
+    output_path = _optional_str(arguments, "output_path")
     if not isinstance(sublayers, list):
         raise ValueError("[-32602] 'sublayers' must be an array")
     try:
@@ -664,7 +722,7 @@ async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
 
 
 async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
+    path = _require_str(arguments, "path")
     frame_raw = arguments.get("frame")
     frame = float(frame_raw) if frame_raw is not None else None
     try:
@@ -675,13 +733,11 @@ async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
 
 async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     import os
-    filepath_template = arguments.get("filepath_template", "")
-    primpath          = arguments.get("primpath", "")
-    output_path       = arguments.get("output_path", "")
+    filepath_template = _require_str(arguments, "filepath_template")
+    primpath          = _require_str(arguments, "primpath")
+    output_path       = _require_str(arguments, "output_path")
     frame_range_raw   = arguments.get("frame_range")
 
-    if not filepath_template or not primpath or not output_path:
-        raise ValueError("[-32602] filepath_template, primpath, and output_path are required")
     if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
         raise ValueError("[-32602] frame_range must be a [start, end] integer array")
     frame_range = (int(frame_range_raw[0]), int(frame_range_raw[1]))
@@ -690,7 +746,7 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     scene_range      = (int(scene_range_raw[0]), int(scene_range_raw[1])) if scene_range_raw else None
     loop             = bool(arguments.get("loop", False))
     clip_set         = str(arguments.get("clip_set", "default"))
-    clip_primpath    = arguments.get("clip_primpath")
+    clip_primpath    = _optional_str(arguments, "clip_primpath")
     strict           = bool(arguments.get("strict", False))
     gen_topology     = bool(arguments.get("gen_topology", True))
     gen_manifest     = bool(arguments.get("gen_manifest", True))
@@ -723,10 +779,10 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
 
 
 async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
-    prim_path = arguments.get("prim_path", "")
+    path = _require_str(arguments, "path")
+    prim_path = _require_str(arguments, "prim_path")
     detail = str(arguments.get("detail", "types"))
-    filter_prefix = arguments.get("filter") or None
+    filter_prefix = _optional_str(arguments, "filter")
     limit = int(arguments.get("limit", 200))
     frame_raw = arguments.get("frame")
     frame = float(frame_raw) if frame_raw is not None else None
@@ -739,9 +795,9 @@ async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextConten
 
 
 async def _handle_read_attribute_value(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
-    prim_path = arguments.get("prim_path", "")
-    attribute_name = arguments.get("attribute_name", "")
+    path = _require_str(arguments, "path")
+    prim_path = _require_str(arguments, "prim_path")
+    attribute_name = _require_str(arguments, "attribute_name")
     frame_raw = arguments.get("frame")
     frame = float(frame_raw) if frame_raw is not None else None
     max_elements = int(arguments.get("max_elements", 100))
@@ -760,3 +816,19 @@ async def _handle_read_attribute_value(arguments: dict) -> list[types.TextConten
 def _usd_error(e: Exception) -> ValueError:
     code = -32602 if isinstance(e, FileNotFoundError) else -32600
     return ValueError(f"[{code}] {e}")
+
+
+def _require_str(arguments: dict, key: str) -> str:
+    v = arguments.get(key)
+    if not isinstance(v, str) or not v:
+        raise ValueError(f"[-32602] '{key}' is required and must be a non-empty string")
+    return v
+
+
+def _optional_str(arguments: dict, key: str) -> str | None:
+    v = arguments.get(key)
+    if v is None or v == "":
+        return None
+    if not isinstance(v, str):
+        raise ValueError(f"[-32602] '{key}' must be a string if provided")
+    return v
