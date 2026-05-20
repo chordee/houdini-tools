@@ -10,6 +10,7 @@ from usd_tools import (
     UsdOpenError,
     add_sublayers,
     create_expressions_layer,
+    insert_sublayers,
     read_layer_metadata,
     read_layer_hierarchy,
     read_composed_hierarchy,
@@ -255,6 +256,55 @@ TOOLS = [
                         "'prepend' = insert at the top of subLayerPaths "
                         "(strongest); 'append' = insert at the bottom "
                         "(weakest)."
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional. If given, export the modified layer to "
+                        "this path (must not already exist) instead of "
+                        "saving in-place. The source file is not touched."
+                    ),
+                },
+            },
+        },
+    ),
+    types.Tool(
+        name="usd_insert_sublayers",
+        description=(
+            "Insert one or more sublayer asset paths at an explicit position "
+            "in a USD layer's subLayerPaths. 'index' is 0-based against the "
+            "current list length: 0 = top (strongest, same as "
+            "usd_add_sublayers prepend), len(existing) = bottom (weakest, "
+            "same as append). Values outside [0, len] — including negatives "
+            "— raise. Multiple entries inserted at index i preserve input "
+            "order and land at i, i+1, i+2, ... Same dedup and anonymous-"
+            "identifier rejection as usd_add_sublayers. By default saves in-"
+            "place; pass 'output_path' to export to a new file instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "required": ["path", "sublayers", "index"],
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to an existing USD file to edit",
+                },
+                "sublayers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "description": (
+                        "Non-empty list of sublayer asset path strings to "
+                        "insert (stored as-is)."
+                    ),
+                },
+                "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": (
+                        "0-based insertion index. Must be in "
+                        "[0, len(existing_subLayerPaths)] inclusive."
                     ),
                 },
                 "output_path": {
@@ -533,6 +583,8 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_replace_anchors(arguments)
     if name == "usd_add_sublayers":
         return await _handle_add_sublayers(arguments)
+    if name == "usd_insert_sublayers":
+        return await _handle_insert_sublayers(arguments)
     if name == "usd_remove_sublayers":
         return await _handle_remove_sublayers(arguments)
     if name == "usd_read_cameras":
@@ -643,6 +695,24 @@ async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
         raise ValueError("[-32602] 'position' is required")
     try:
         result = add_sublayers(path, sublayers, position, output_path=output_path)
+        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+async def _handle_insert_sublayers(arguments: dict) -> list[types.TextContent]:
+    path = arguments.get("path", "")
+    sublayers = arguments.get("sublayers")
+    index = arguments.get("index")
+    output_path = arguments.get("output_path") or None
+    if not path:
+        raise ValueError("[-32602] 'path' is required")
+    if not isinstance(sublayers, list):
+        raise ValueError("[-32602] 'sublayers' must be an array")
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise ValueError("[-32602] 'index' must be an integer")
+    try:
+        result = insert_sublayers(path, sublayers, index, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
