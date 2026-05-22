@@ -1,6 +1,6 @@
 # houdini-tools
 
-Houdini toolkit plugin for Claude Code, Codex, and Gemini CLI. Bundles four skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
+Houdini toolkit plugin for Claude Code, Codex, and Antigravity CLI. Bundles four skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
 
 ## Contents
 
@@ -37,19 +37,19 @@ git clone https://github.com/chordee/houdini-tools.git
 
 The MCP server pulls its own Python dependencies on first run via `uv` — no manual `uv sync` required.
 
-### Gemini CLI
+### Antigravity CLI
 
-Symlink (Linux/macOS) or junction (Windows) the repo into Gemini's extensions directory:
+Symlink (Linux/macOS) or junction (Windows) the repo into Antigravity's plugins directory:
 
 ```bash
-ln -s <repo-root> ~/.gemini/extensions/houdini-tools
+ln -s <repo-root> ~/.gemini/antigravity-cli/plugins/houdini-tools
 ```
 
 ```cmd
-mklink /J "%USERPROFILE%\.gemini\extensions\houdini-tools" "<repo-root>"
+mklink /J "%USERPROFILE%\.gemini\antigravity-cli\plugins\houdini-tools" "<repo-root>"
 ```
 
-Gemini auto-loads the extension on next launch (manifest: `gemini-extension.json`).
+Antigravity auto-loads the plugin on next launch (manifest: `plugin.json` and `mcp_config.json`). Alternatively, you can link it into a workspace-level plugins directory at `.agents/plugins/houdini-tools`.
 
 ### Claude Code
 
@@ -94,7 +94,8 @@ Codex reads `.mcp.json` to launch the bundled MCP server.
 | `.claude-plugin/plugin.json` | Claude Code plugin manifest (declares MCP server) |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Codex MCP server config |
-| `gemini-extension.json` | Gemini CLI extension manifest |
+| `plugin.json` | Antigravity CLI plugin manifest |
+| `mcp_config.json` | Antigravity CLI MCP server config |
 
 ## Layout
 
@@ -103,7 +104,8 @@ houdini-tools/
 ├── .claude-plugin/plugin.json     # Claude Code plugin manifest (with MCP server)
 ├── .codex-plugin/plugin.json      # Codex plugin manifest
 ├── .mcp.json                      # Codex MCP server config
-├── gemini-extension.json          # Gemini CLI extension manifest (with MCP server)
+├── plugin.json                    # Antigravity CLI plugin manifest
+├── mcp_config.json                # Antigravity CLI MCP server config (with MCP server)
 ├── mcp-server-houdini-lite/       # Bundled MCP server (uv project)
 └── skills/
     ├── houdini-cli/               # CLI tool reference + workflows

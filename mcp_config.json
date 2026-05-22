@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "houdini-lite": {
+      "command": "uv",
+      "args": ["run", "--directory", "${extensionPath}/mcp-server-houdini-lite", "server.py"]
+    }
+  }
+}
