@@ -45,11 +45,13 @@ Symlink (Linux/macOS) or junction (Windows) the repo into Antigravity's plugins 
 ln -s <repo-root> ~/.gemini/antigravity-cli/plugins/houdini-tools
 ```
 
+*(Note: The `.gemini` path is intentional as Antigravity CLI uses it as its plugin staging directory.)*
+
 ```cmd
 mklink /J "%USERPROFILE%\.gemini\antigravity-cli\plugins\houdini-tools" "<repo-root>"
 ```
 
-Antigravity auto-loads the plugin on next launch (manifest: `plugin.json` and `mcp_config.json`). Alternatively, you can link it into a workspace-level plugins directory at `.agents/plugins/houdini-tools`.
+Antigravity CLI stages plugins under `~/.gemini/antigravity-cli/plugins/<plugin_name>/`, and the agent automatically discovers and loads those staged customizations. In this folder, `plugin.json` is required and `mcp_config.json` is optional.
 
 ### Claude Code
 
