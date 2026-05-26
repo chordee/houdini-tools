@@ -8,7 +8,7 @@
   "mcpServers": {
     "houdini-lite": {
       "command": "uv",
-      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/mcp-server-houdini-lite", "server.py"]
+      "args": ["run", "--no-sync", "--directory", "${CLAUDE_PLUGIN_ROOT}/mcp-server-houdini-lite", "server.py"]
     }
   }
 }
