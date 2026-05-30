@@ -39,17 +39,32 @@ The MCP server pulls its own Python dependencies on first run via `uv` — no ma
 
 ### Antigravity CLI
 
-Symlink (Linux/macOS) or junction (Windows) the repo into Antigravity's plugins directory:
+Link the repo into Antigravity's plugins directory:
 
 ```bash
+# Linux / macOS
 ln -s <repo-root> ~/.gemini/antigravity-cli/plugins/houdini-tools
 ```
 
-*(Note: The `.gemini` path is intentional as Antigravity CLI uses it as its plugin staging directory.)*
-
-```cmd
-mklink /J "%USERPROFILE%\.gemini\antigravity-cli\plugins\houdini-tools" "<repo-root>"
+```powershell
+# Windows PowerShell — requires admin rights or Developer Mode enabled
+$link   = "$env:USERPROFILE\.gemini\antigravity-cli\plugins\houdini-tools"
+$target = "<repo-root>"
+New-Item -ItemType Directory -Force -Path (Split-Path $link) | Out-Null
+if (Test-Path -LiteralPath $link) { (Get-Item -LiteralPath $link).Delete() }
+New-Item -ItemType SymbolicLink -Path $link -Target $target | Out-Null
 ```
+
+> [!IMPORTANT]
+> **On Windows the link must be a SymbolicLink, not a Junction (`mklink /J`).** Antigravity's plugin scanner follows SymbolicLinks but skips Junctions, so a junctioned plugin appears installed yet none of its skills show up in the Skills list. Git Bash's `ln -s` on Windows may also degrade to a copy or Junction depending on Developer Mode settings — using PowerShell's `New-Item -ItemType SymbolicLink` is the most reliable approach.
+
+Verify the link type (should report `SymbolicLink`, not `Junction`):
+
+```powershell
+Get-Item "$env:USERPROFILE\.gemini\antigravity-cli\plugins\houdini-tools" | Select-Object Name, LinkType, Target
+```
+
+*(Note: The `.gemini` path is intentional as Antigravity CLI uses it as its plugin staging directory.)*
 
 Antigravity CLI stages plugins under `~/.gemini/antigravity-cli/plugins/<plugin_name>/`, and the agent automatically discovers and loads those staged customizations. In this folder, `plugin.json` is required and `mcp_config.json` is optional.
 
