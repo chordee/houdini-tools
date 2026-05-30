@@ -16,10 +16,14 @@ This skill provides a reliable way to find all Houdini installation paths withou
 ## Workflow
 
 ### 1. Run the Detection Script
-Run the detection script appropriate for the current operating system:
+The detection script lives in the `scripts/` subdirectory next to this `SKILL.md`. Resolve its absolute path from wherever you loaded this skill from on disk, then invoke the file appropriate for the current OS:
 
-- **Windows**: `powershell -ExecutionPolicy Bypass -File "$SKILLS_ROOT/houdini-locator/scripts/find-houdini.ps1"`
-- **Linux**: `bash $SKILLS_ROOT/houdini-locator/scripts/find-houdini.sh`
+- **Windows** — `scripts/find-houdini.ps1`, invoked with PowerShell:
+  `powershell -ExecutionPolicy Bypass -File "<skill-dir>/scripts/find-houdini.ps1"`
+- **Linux** — `scripts/find-houdini.sh`, invoked with bash:
+  `bash <skill-dir>/scripts/find-houdini.sh`
+
+Replace `<skill-dir>` with the absolute filesystem path of the directory holding this `SKILL.md`.
 
 ### 2. Parse the Results
 Analyze the output to identify:
