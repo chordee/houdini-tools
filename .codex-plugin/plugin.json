@@ -6,5 +6,22 @@
     "name": "chordee"
   },
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Houdini Tools",
+    "shortDescription": "Houdini CLI, locator, environment, and lightweight scene inspection tools",
+    "longDescription": "Bundles Houdini command-line workflows, installation discovery, Houdini environment references, and a lightweight MCP server for inspecting bgeo and USD files without loading Houdini geometry.",
+    "developerName": "chordee",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Automation",
+      "Read",
+      "Developer Tools"
+    ],
+    "defaultPrompt": [
+      "用 houdini-locator 找 Houdini 安裝路徑",
+      "用 houdini-cli 檢查 Houdini 命令列工具",
+      "用 houdini-lite 檢查 bgeo 或 USD 檔案"
+    ]
+  }
 }
