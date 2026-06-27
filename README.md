@@ -1,6 +1,6 @@
 # houdini-tools
 
-Houdini toolkit plugin for Claude Code, Codex, and Antigravity CLI. Bundles four skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
+Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles four skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
 
 ## Contents
 
@@ -37,18 +37,18 @@ git clone https://github.com/chordee/houdini-tools.git
 
 The MCP server pulls its own Python dependencies on first run via `uv` — no manual `uv sync` required.
 
-### Antigravity CLI
+### Antigravity (CLI & IDE)
 
 Link the repo into Antigravity's plugins directory:
 
 ```bash
 # Linux / macOS
-ln -s <repo-root> ~/.gemini/antigravity-cli/plugins/houdini-tools
+ln -s <repo-root> ~/.gemini/config/plugins/houdini-tools
 ```
 
 ```powershell
 # Windows PowerShell — requires admin rights or Developer Mode enabled
-$link   = "$env:USERPROFILE\.gemini\antigravity-cli\plugins\houdini-tools"
+$link   = "$env:USERPROFILE\.gemini\config\plugins\houdini-tools"
 $target = "<repo-root>"
 New-Item -ItemType Directory -Force -Path (Split-Path $link) | Out-Null
 if (Test-Path -LiteralPath $link) { (Get-Item -LiteralPath $link).Delete() }
@@ -61,12 +61,12 @@ New-Item -ItemType SymbolicLink -Path $link -Target $target | Out-Null
 Verify the link type (should report `SymbolicLink`, not `Junction`):
 
 ```powershell
-Get-Item "$env:USERPROFILE\.gemini\antigravity-cli\plugins\houdini-tools" | Select-Object Name, LinkType, Target
+Get-Item "$env:USERPROFILE\.gemini\config\plugins\houdini-tools" | Select-Object Name, LinkType, Target
 ```
 
-*(Note: The `.gemini` path is intentional as Antigravity CLI uses it as its plugin staging directory.)*
+*(Note: The `.gemini` path is intentional as Antigravity uses it as its plugin staging directory.)*
 
-Antigravity CLI stages plugins under `~/.gemini/antigravity-cli/plugins/<plugin_name>/`, and the agent automatically discovers and loads those staged customizations. In this folder, `plugin.json` is required and `mcp_config.json` is optional.
+Antigravity stages plugins under `~/.gemini/config/plugins/<plugin_name>/`, and the agent automatically discovers and loads those staged customizations. In this folder, `plugin.json` is required and `mcp_config.json` is optional.
 
 ### Claude Code
 
@@ -108,11 +108,11 @@ Codex reads `.mcp.json` to launch the bundled MCP server.
 
 | File | Purpose |
 | --- | --- |
-| `.claude-plugin/plugin.json` | Claude Code plugin manifest (declares MCP server) |
+| `.claude-plugin/plugin.json` | Claude Code plugin manifest |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
-| `.mcp.json` | Codex MCP server config |
-| `plugin.json` | Antigravity CLI plugin manifest |
-| `mcp_config.json` | Antigravity CLI MCP server config |
+| `.mcp.json` | Codex MCP server configuration |
+| `plugin.json` | Antigravity plugin manifest |
+| `mcp_config.json` | Antigravity MCP server configuration |
 
 ## Layout
 
@@ -121,8 +121,8 @@ houdini-tools/
 ├── .claude-plugin/plugin.json     # Claude Code plugin manifest (with MCP server)
 ├── .codex-plugin/plugin.json      # Codex plugin manifest
 ├── .mcp.json                      # Codex MCP server config
-├── plugin.json                    # Antigravity CLI plugin manifest
-├── mcp_config.json                # Antigravity CLI MCP server config (with MCP server)
+├── plugin.json                    # Antigravity plugin manifest
+├── mcp_config.json                # Antigravity MCP server config (with MCP server)
 ├── mcp-server-houdini-lite/       # Bundled MCP server (uv project)
 └── skills/
     ├── houdini-cli/               # CLI tool reference + workflows
