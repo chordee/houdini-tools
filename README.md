@@ -39,34 +39,23 @@ The MCP server pulls its own Python dependencies on first run via `uv` — no ma
 
 ### Antigravity (CLI & IDE)
 
-Link the repo into Antigravity's plugins directory:
+Add the repo's parent directory as a marketplace in `~/.gemini/config/config.json` (or `~/.gemini/settings.json`), then enable the plugin:
 
-```bash
-# Linux / macOS
-ln -s <repo-root> ~/.gemini/config/plugins/houdini-tools
+```json
+"extraKnownMarketplaces": {
+  "houdini-tools": {
+    "source": {
+      "source": "directory",
+      "path": "<parent-of-repo-root>"
+    }
+  }
+},
+"enabledPlugins": {
+  "houdini-tools@houdini-tools": true
+}
 ```
 
-```powershell
-# Windows PowerShell — requires admin rights or Developer Mode enabled
-$link   = "$env:USERPROFILE\.gemini\config\plugins\houdini-tools"
-$target = "<repo-root>"
-New-Item -ItemType Directory -Force -Path (Split-Path $link) | Out-Null
-if (Test-Path -LiteralPath $link) { (Get-Item -LiteralPath $link).Delete() }
-New-Item -ItemType SymbolicLink -Path $link -Target $target | Out-Null
-```
-
-> [!IMPORTANT]
-> **On Windows the link must be a SymbolicLink, not a Junction (`mklink /J`).** Antigravity's plugin scanner follows SymbolicLinks but skips Junctions, so a junctioned plugin appears installed yet none of its skills show up in the Skills list. Git Bash's `ln -s` on Windows may also degrade to a copy or Junction depending on Developer Mode settings — using PowerShell's `New-Item -ItemType SymbolicLink` is the most reliable approach.
-
-Verify the link type (should report `SymbolicLink`, not `Junction`):
-
-```powershell
-Get-Item "$env:USERPROFILE\.gemini\config\plugins\houdini-tools" | Select-Object Name, LinkType, Target
-```
-
-*(Note: The `.gemini` path is intentional as Antigravity uses it as its plugin staging directory.)*
-
-Antigravity stages plugins under `~/.gemini/config/plugins/<plugin_name>/`, and the agent automatically discovers and loads those staged customizations. In this folder, `plugin.json` is required and `mcp_config.json` is optional.
+Reload plugins (or restart your session) — the staged plugin and its MCP servers will load automatically.
 
 ### Claude Code
 
