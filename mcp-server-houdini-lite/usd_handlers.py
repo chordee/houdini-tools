@@ -2,15 +2,12 @@
 usd_handlers.py — MCP tool definitions and handlers for USD tools
 """
 
-import json
 from typing import Annotated, Literal
 
 import mcp.types as types
 from mcp.server import MCPServer
 from mcp.shared.exceptions import MCPError
 from pydantic import Field
-
-from handler_args import to_float, to_int
 
 from usd_tools import (
     UsdOpenError,
@@ -49,6 +46,7 @@ def register(mcp: MCPServer) -> None:
     mcp.tool()(usd_add_sublayers)
     mcp.tool()(usd_insert_sublayers)
     mcp.tool()(usd_remove_sublayers)
+    mcp.tool()(usd_stitch_clips)
 
 
 def usd_read_layer_metadata(
@@ -207,135 +205,25 @@ def usd_remove_sublayers(
         raise _usd_error(e) from e
 
 
-# ---------------------------------------------------------------------------
-# Tool definitions (not yet converted — Task 6)
-# ---------------------------------------------------------------------------
-
-TOOLS = [
-    types.Tool(
-        name="usd_stitch_clips",
-        description=(
-            "Stitch per-frame USD cache files into a single USD Value Clips stage. "
-            "Automatically generates topology.usd and manifest.usd alongside the output. "
-            "Supports frame looping, custom clip sets, and auto-detection of animated child prims."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["filepath_template", "primpath", "output_path", "frame_range"],
-            "properties": {
-                "filepath_template": {
-                    "type": "string",
-                    "description": "Per-frame path template. Supports {frame:04d} or $F4 format.",
-                },
-                "primpath": {
-                    "type": "string",
-                    "description": "Target prim path on the stage, e.g. /Geometry",
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": "Absolute output path (.usd / .usda / .usdc)",
-                },
-                "frame_range": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "description": "Source file frame range [start, end] (inclusive)",
-                },
-                "scene_range": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "description": "Scene timeline frame range [start, end]. Defaults to frame_range.",
-                },
-                "loop": {
-                    "type": "boolean",
-                    "description": "Loop file frames to fill scene_range. Default: false",
-                    "default": False,
-                },
-                "clip_set": {
-                    "type": "string",
-                    "description": 'USD Clip Set name. Default: "default"',
-                    "default": "default",
-                },
-                "clip_primpath": {
-                    "type": "string",
-                    "description": "Prim path inside clip files. Defaults to primpath.",
-                },
-                "strict": {
-                    "type": "boolean",
-                    "description": "Abort if any source file is missing. Default: false",
-                    "default": False,
-                },
-                "gen_topology": {
-                    "type": "boolean",
-                    "description": "Auto-generate topology.usd. Default: true",
-                    "default": True,
-                },
-                "gen_manifest": {
-                    "type": "boolean",
-                    "description": "Auto-generate manifest.usd. Default: true",
-                    "default": True,
-                },
-                "probe_frame": {
-                    "type": "integer",
-                    "description": "Frame used to generate topology/manifest. Defaults to first frame of frame_range.",
-                },
-                "auto_detect_prim": {
-                    "type": "boolean",
-                    "description": "Recursively detect animated child prims. Default: true",
-                    "default": True,
-                },
-                "fps": {
-                    "type": "number",
-                    "description": "Output stage FPS. Auto-detected from probe frame if omitted.",
-                },
-            },
-        },
-    ),
-]
-
-# ---------------------------------------------------------------------------
-# Router (not yet converted tools only)
-# ---------------------------------------------------------------------------
-
-async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "usd_stitch_clips":
-        return await _handle_stitch_clips(arguments)
-    raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
-
-# ---------------------------------------------------------------------------
-# Handlers (not yet converted tools only)
-# ---------------------------------------------------------------------------
-
-async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
-    import os
-    filepath_template = _require_str(arguments, "filepath_template")
-    primpath          = _require_str(arguments, "primpath")
-    output_path       = _require_str(arguments, "output_path")
-    frame_range_raw   = arguments.get("frame_range")
-
-    if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
-        raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
-    frame_range = (to_int(frame_range_raw[0], "frame_range"), to_int(frame_range_raw[1], "frame_range"))
-
-    scene_range_raw  = arguments.get("scene_range")
-    scene_range      = (to_int(scene_range_raw[0], "scene_range"), to_int(scene_range_raw[1], "scene_range")) if scene_range_raw else None
-    loop             = bool(arguments.get("loop", False))
-    clip_set         = str(arguments.get("clip_set", "default"))
-    clip_primpath    = _optional_str(arguments, "clip_primpath")
-    strict           = bool(arguments.get("strict", False))
-    gen_topology     = bool(arguments.get("gen_topology", True))
-    gen_manifest     = bool(arguments.get("gen_manifest", True))
-    probe_frame_raw  = arguments.get("probe_frame")
-    probe_frame      = to_int(probe_frame_raw, "probe_frame") if probe_frame_raw is not None else None
-    auto_detect_prim = bool(arguments.get("auto_detect_prim", True))
-    fps_raw          = arguments.get("fps")
-    fps              = to_float(fps_raw, "fps") if fps_raw is not None else None
-
+def usd_stitch_clips(
+    filepath_template: Annotated[str, Field(min_length=1, description="Per-frame path template. Supports {frame:04d} or $F4 format.")],
+    primpath: Annotated[str, Field(min_length=1, description="Target prim path on the stage, e.g. /Geometry")],
+    output_path: Annotated[str, Field(min_length=1, description="Absolute output path (.usd / .usda / .usdc)")],
+    frame_range: Annotated[tuple[int, int], Field(description="Source file frame range [start, end] (inclusive)")],
+    scene_range: Annotated[tuple[int, int] | None, Field(description="Scene timeline frame range [start, end]. Defaults to frame_range.")] = None,
+    loop: Annotated[bool, Field(description="Loop file frames to fill scene_range. Default: false")] = False,
+    clip_set: Annotated[str, Field(description='USD Clip Set name. Default: "default"')] = "default",
+    clip_primpath: Annotated[str | None, Field(description="Prim path inside clip files. Defaults to primpath.")] = None,
+    strict: Annotated[bool, Field(description="Abort if any source file is missing. Default: false")] = False,
+    gen_topology: Annotated[bool, Field(description="Auto-generate topology.usd. Default: true")] = True,
+    gen_manifest: Annotated[bool, Field(description="Auto-generate manifest.usd. Default: true")] = True,
+    probe_frame: Annotated[int | None, Field(description="Frame used to generate topology/manifest. Defaults to first frame of frame_range.")] = None,
+    auto_detect_prim: Annotated[bool, Field(description="Recursively detect animated child prims. Default: true")] = True,
+    fps: Annotated[float | None, Field(description="Output stage FPS. Auto-detected from probe frame if omitted.")] = None,
+) -> dict:
+    """Stitch per-frame USD cache files into a single USD Value Clips stage. Automatically generates topology.usd and manifest.usd alongside the output. Supports frame looping, custom clip sets, and auto-detection of animated child prims."""
     try:
-        result = stitch_clips(
+        return stitch_clips(
             filepath_template=filepath_template,
             primpath=primpath,
             output_path=output_path,
@@ -351,10 +239,22 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
             auto_detect_prim=auto_detect_prim,
             fps=fps,
         )
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, StitchClipsError) as e:
         raise _usd_error(e) from e
 
+
+# ---------------------------------------------------------------------------
+# Tool definitions (all converted)
+# ---------------------------------------------------------------------------
+
+TOOLS = []
+
+# ---------------------------------------------------------------------------
+# Router (all converted)
+# ---------------------------------------------------------------------------
+
+async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
 
 # ---------------------------------------------------------------------------
 # Error helper
