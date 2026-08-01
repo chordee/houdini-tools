@@ -23,3 +23,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local-only test suite (kept out of the published project)
+mcp-server-houdini-lite/tests/
+
+# Local-only planning docs (superpowers specs)
+docs/superpowers/
