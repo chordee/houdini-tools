@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 import mcp.types as types
 from mcp.server import MCPServer
 from mcp.shared.exceptions import MCPError
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 
 from usd_tools import (
     UsdOpenError,
@@ -27,8 +27,13 @@ from usd_tools import (
 )
 from usd_clips import StitchClipsError, stitch_clips
 
+# Optional string that treats "" as "not set", preserving the pre-migration
+# _optional_str() behaviour these parameters relied on.
+OptionalStr = Annotated[str | None, BeforeValidator(lambda v: None if v == "" else v)]
+
+
 # ---------------------------------------------------------------------------
-# @mcp.tool() registrations (converted tools)
+# @mcp.tool() registrations
 # ---------------------------------------------------------------------------
 
 
@@ -106,7 +111,7 @@ def usd_read_prim_attributes(
     path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
     prim_path: Annotated[str, Field(min_length=1, description="USD scene path of the prim to inspect (e.g. /Geo/mesh)")],
     detail: Annotated[Literal["names", "types", "samples"], Field(description="'names' → attribute names only; 'types' → add type_name, variability, is_array, array_size; 'samples' → also add has_time_samples, time_sample_count")] = "types",
-    filter: Annotated[str | None, Field(description="Return only attributes whose name starts with this prefix (e.g. 'primvars:')")] = None,
+    filter: Annotated[OptionalStr, Field(description="Return only attributes whose name starts with this prefix (e.g. 'primvars:')")] = None,
     limit: Annotated[int, Field(description="Maximum number of attributes to return (default 200)")] = 200,
     frame: Annotated[float | None, Field(description="Time code used to evaluate array_size. Omit for default time.")] = None,
     load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the target prim is defined inside a payload. Default: false.")] = False,
@@ -136,7 +141,7 @@ def usd_read_attribute_value(
 def usd_write_layer_metadata(
     path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
     metadata: Annotated[dict, Field(description="Map of metadata field name to new value. Allowed fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, expressionVariables. Value null clears the field.")],
-    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
 ) -> dict:
     """Update layer-level metadata on a USD layer. Only fields present in the 'metadata' argument are touched; unmentioned fields are left as-is. A field value of null clears the field back to its unauthored state. Dict-valued fields (customLayerData / expressionVariables) are fully replaced. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, and the extension determines format — so this can also convert .usda <-> .usdc). expressionVariables values are restricted to str / bool / int / homogeneous list of those."""
     try:
@@ -171,7 +176,7 @@ def usd_add_sublayers(
     path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
     sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to add. Stored as-is — pass the exact string you want to appear in subLayerPaths.")],
     position: Annotated[Literal["prepend", "append"], Field(description="'prepend' = insert at the top of subLayerPaths (strongest); 'append' = insert at the bottom (weakest).")],
-    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
 ) -> dict:
     """Add one or more sublayer asset paths to a USD layer's subLayerPaths list. position='prepend' puts the new entries at the top (strongest), so for input ['A','B','C'] the final list is ['A','B','C', ...existing]. position='append' puts them at the bottom (weakest), so final = [...existing, 'A','B','C']. Entries whose string is already present are skipped (no-op) and reported in 'skipped'; anonymous identifiers (starting with 'anon:') are rejected. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, must not already exist; extension decides format)."""
     try:
@@ -184,7 +189,7 @@ def usd_insert_sublayers(
     path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
     sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to insert (stored as-is).")],
     index: Annotated[int, Field(ge=0, strict=True, description="0-based insertion index. Must be in [0, len(existing_subLayerPaths)] inclusive.")],
-    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
 ) -> dict:
     """Insert one or more sublayer asset paths at an explicit position in a USD layer's subLayerPaths. 'index' is 0-based against the current list length: 0 = top (strongest, same as usd_add_sublayers prepend), len(existing) = bottom (weakest, same as append). Values outside [0, len] — including negatives — raise. Multiple entries inserted at index i preserve input order and land at i, i+1, i+2, ... Same dedup and anonymous-identifier rejection as usd_add_sublayers. By default saves in-place; pass 'output_path' to export to a new file instead."""
     try:
@@ -196,7 +201,7 @@ def usd_insert_sublayers(
 def usd_remove_sublayers(
     path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
     sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to remove (exact string match).")],
-    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
 ) -> dict:
     """Remove one or more sublayer asset paths from a USD layer's subLayerPaths list. Matches the exact stored strings (same strings returned by usd_read_composition_arcs). Entries not found are silently skipped and reported in 'not_found' — no error is raised, so partial removals always succeed. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched)."""
     try:
@@ -213,7 +218,7 @@ def usd_stitch_clips(
     scene_range: Annotated[tuple[int, int] | None, Field(description="Scene timeline frame range [start, end]. Defaults to frame_range.")] = None,
     loop: Annotated[bool, Field(description="Loop file frames to fill scene_range. Default: false")] = False,
     clip_set: Annotated[str, Field(description='USD Clip Set name. Default: "default"')] = "default",
-    clip_primpath: Annotated[str | None, Field(description="Prim path inside clip files. Defaults to primpath.")] = None,
+    clip_primpath: Annotated[OptionalStr, Field(description="Prim path inside clip files. Defaults to primpath.")] = None,
     strict: Annotated[bool, Field(description="Abort if any source file is missing. Default: false")] = False,
     gen_topology: Annotated[bool, Field(description="Auto-generate topology.usd. Default: true")] = True,
     gen_manifest: Annotated[bool, Field(description="Auto-generate manifest.usd. Default: true")] = True,
