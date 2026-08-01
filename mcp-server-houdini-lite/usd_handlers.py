@@ -3,9 +3,12 @@ usd_handlers.py — MCP tool definitions and handlers for USD tools
 """
 
 import json
+from typing import Annotated, Literal
 
 import mcp.types as types
+from mcp.server import MCPServer
 from mcp.shared.exceptions import MCPError
+from pydantic import Field
 
 from handler_args import to_float, to_int
 
@@ -28,33 +31,109 @@ from usd_tools import (
 from usd_clips import StitchClipsError, stitch_clips
 
 # ---------------------------------------------------------------------------
-# Tool definitions
+# @mcp.tool() registrations (converted tools)
+# ---------------------------------------------------------------------------
+
+
+def register(mcp: MCPServer) -> None:
+    mcp.tool()(usd_read_layer_metadata)
+    mcp.tool()(usd_read_hierarchy)
+    mcp.tool()(usd_read_hierarchy_composed)
+    mcp.tool()(usd_read_composition_arcs)
+    mcp.tool()(usd_read_cameras)
+    mcp.tool()(usd_read_prim_attributes)
+    mcp.tool()(usd_read_attribute_value)
+
+
+def usd_read_layer_metadata(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+) -> dict:
+    """Read layer-level metadata from a single USD layer file (.usd, .usda, .usdc, .usdz) without composition. Returns the file format and all standard layer metadata fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, and expressionVariables. A field that has not been authored in the file is reported as null (distinguishing 'unauthored' from a legitimate authored zero / empty value)."""
+    try:
+        return read_layer_metadata(path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_hierarchy(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    max_depth: Annotated[int, Field(description="Maximum hierarchy depth to return (0 = unlimited, 1 = root prims only, etc.)")] = 0,
+) -> dict:
+    """Read the prim hierarchy from a single USD layer without composition. References, sublayers, and payloads are NOT resolved — only prims defined directly in this file are returned. Fastest option for a quick structural overview of one file."""
+    try:
+        return read_layer_hierarchy(path, max_depth=max_depth)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_hierarchy_composed(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    max_depth: Annotated[int, Field(description="Maximum hierarchy depth to return (0 = unlimited)")] = 0,
+) -> dict:
+    """Read the fully composed USD prim hierarchy, resolving all references and sublayers. Payloads are intentionally not loaded to keep memory usage low. Use this when you need to see the complete scene structure across multiple referenced files."""
+    try:
+        return read_composed_hierarchy(path, max_depth=max_depth)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_composition_arcs(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+) -> dict:
+    """List the direct composition arcs declared in a single USD layer: sublayers, references, and payloads. No composition is performed — only arcs explicitly written in this file are returned. Use this to understand which other USD files this layer depends on."""
+    try:
+        return read_composition_arcs(path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_cameras(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file (.usd, .usda, .usdc, .usdz)")],
+    frame: Annotated[float | None, Field(description="Time code (frame number) at which to evaluate time-sampled attributes. Omit to use the default (static) value.")] = None,
+) -> dict:
+    """Find all Camera prims in a USD scene and read their lens and projection attributes (focalLength, aperture, clippingRange, fStop, focusDistance, projection, shutter). The stage is fully composed — references and sublayers are resolved — but payloads are not loaded. Use this to inspect camera settings from any USD file."""
+    try:
+        return read_cameras(path, frame=frame)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_prim_attributes(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    prim_path: Annotated[str, Field(min_length=1, description="USD scene path of the prim to inspect (e.g. /Geo/mesh)")],
+    detail: Annotated[Literal["names", "types", "samples"], Field(description="'names' → attribute names only; 'types' → add type_name, variability, is_array, array_size; 'samples' → also add has_time_samples, time_sample_count")] = "types",
+    filter: Annotated[str | None, Field(description="Return only attributes whose name starts with this prefix (e.g. 'primvars:')")] = None,
+    limit: Annotated[int, Field(ge=0, description="Maximum number of attributes to return (default 200)")] = 200,
+    frame: Annotated[float | None, Field(description="Time code used to evaluate array_size. Omit for default time.")] = None,
+    load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the target prim is defined inside a payload. Default: false.")] = False,
+) -> dict:
+    """List attributes on a USD prim with progressive disclosure. Use detail='names' for a fast attribute name overview, 'types' (default) to add type info and array sizes, or 'samples' to also include time sample counts. Use filter to narrow by name prefix (e.g. 'primvars:'), and limit to cap the number of attributes returned."""
+    try:
+        return read_prim_attributes(path, prim_path, detail=detail, filter_prefix=filter, limit=limit, frame=frame, load_payloads=load_payloads)
+    except (FileNotFoundError, UsdOpenError, ValueError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_attribute_value(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    prim_path: Annotated[str, Field(min_length=1, description="USD scene path of the prim (e.g. /Geo/mesh)")],
+    attribute_name: Annotated[str, Field(min_length=1, description="Name of the attribute to read (e.g. 'points', 'xformOp:translate')")],
+    frame: Annotated[float | None, Field(description="Time code at which to evaluate the attribute. Omit for default time.")] = None,
+    max_elements: Annotated[int, Field(description="Maximum array elements to return (default 100)")] = 100,
+    load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the target prim is defined inside a payload. Default: false.")] = False,
+) -> dict:
+    """Read the value of a single named attribute on a USD prim. For array attributes, results are truncated to max_elements (default 100) to avoid large payloads; check array_total and array_truncated in the response."""
+    try:
+        return read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+# ---------------------------------------------------------------------------
+# Tool definitions (not yet converted — Task 5 / Task 6)
 # ---------------------------------------------------------------------------
 
 TOOLS = [
-    types.Tool(
-        name="usd_read_layer_metadata",
-        description=(
-            "Read layer-level metadata from a single USD layer file "
-            "(.usd, .usda, .usdc, .usdz) without composition. Returns "
-            "the file format and all standard layer metadata fields: "
-            "defaultPrim, startTimeCode, endTimeCode, framesPerSecond, "
-            "timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, "
-            "and expressionVariables. A field that has not been authored "
-            "in the file is reported as null (distinguishing 'unauthored' "
-            "from a legitimate authored zero / empty value)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                }
-            },
-        },
-    ),
     types.Tool(
         name="usd_write_layer_metadata",
         description=(
@@ -122,73 +201,6 @@ TOOLS = [
                     "type": "object",
                     "description": "Non-empty dict of variable name to value",
                 },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_hierarchy",
-        description=(
-            "Read the prim hierarchy from a single USD layer without composition. "
-            "References, sublayers, and payloads are NOT resolved — "
-            "only prims defined directly in this file are returned. "
-            "Fastest option for a quick structural overview of one file."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum hierarchy depth to return (0 = unlimited, 1 = root prims only, etc.)",
-                    "default": 0,
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_hierarchy_composed",
-        description=(
-            "Read the fully composed USD prim hierarchy, resolving all "
-            "references and sublayers. Payloads are intentionally not loaded "
-            "to keep memory usage low. Use this when you need to see the "
-            "complete scene structure across multiple referenced files."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum hierarchy depth to return (0 = unlimited)",
-                    "default": 0,
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_composition_arcs",
-        description=(
-            "List the direct composition arcs declared in a single USD layer: "
-            "sublayers, references, and payloads. No composition is performed — "
-            "only arcs explicitly written in this file are returned. "
-            "Use this to understand which other USD files this layer depends on."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                }
             },
         },
     ),
@@ -442,146 +454,17 @@ TOOLS = [
             },
         },
     ),
-    types.Tool(
-        name="usd_read_prim_attributes",
-        description=(
-            "List attributes on a USD prim with progressive disclosure. "
-            "Use detail='names' for a fast attribute name overview, "
-            "'types' (default) to add type info and array sizes, or "
-            "'samples' to also include time sample counts. "
-            "Use filter to narrow by name prefix (e.g. 'primvars:'), "
-            "and limit to cap the number of attributes returned."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "prim_path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "prim_path": {
-                    "type": "string",
-                    "description": "USD scene path of the prim to inspect (e.g. /Geo/mesh)",
-                },
-                "detail": {
-                    "type": "string",
-                    "enum": ["names", "types", "samples"],
-                    "default": "types",
-                    "description": (
-                        "'names' → attribute names only; "
-                        "'types' → add type_name, variability, is_array, array_size; "
-                        "'samples' → also add has_time_samples, time_sample_count"
-                    ),
-                },
-                "filter": {
-                    "type": "string",
-                    "description": "Return only attributes whose name starts with this prefix (e.g. 'primvars:')",
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 200,
-                    "description": "Maximum number of attributes to return (default 200)",
-                },
-                "frame": {
-                    "type": "number",
-                    "description": "Time code used to evaluate array_size. Omit for default time.",
-                },
-                "load_payloads": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Load USD payloads. Required if the target prim is defined inside a payload. Default: false.",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_attribute_value",
-        description=(
-            "Read the value of a single named attribute on a USD prim. "
-            "For array attributes, results are truncated to max_elements (default 100) "
-            "to avoid large payloads; check array_total and array_truncated in the response."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "prim_path", "attribute_name"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "prim_path": {
-                    "type": "string",
-                    "description": "USD scene path of the prim (e.g. /Geo/mesh)",
-                },
-                "attribute_name": {
-                    "type": "string",
-                    "description": "Name of the attribute to read (e.g. 'points', 'xformOp:translate')",
-                },
-                "frame": {
-                    "type": "number",
-                    "description": "Time code at which to evaluate the attribute. Omit for default time.",
-                },
-                "max_elements": {
-                    "type": "integer",
-                    "default": 100,
-                    "description": "Maximum array elements to return (default 100)",
-                },
-                "load_payloads": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Load USD payloads. Required if the target prim is defined inside a payload. Default: false.",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_cameras",
-        description=(
-            "Find all Camera prims in a USD scene and read their lens and "
-            "projection attributes (focalLength, aperture, clippingRange, "
-            "fStop, focusDistance, projection, shutter). "
-            "The stage is fully composed — references and sublayers are "
-            "resolved — but payloads are not loaded. "
-            "Use this to inspect camera settings from any USD file."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file (.usd, .usda, .usdc, .usdz)",
-                },
-                "frame": {
-                    "type": "number",
-                    "description": (
-                        "Time code (frame number) at which to evaluate time-sampled "
-                        "attributes. Omit to use the default (static) value."
-                    ),
-                },
-            },
-        },
-    ),
 ]
 
 # ---------------------------------------------------------------------------
-# Router
+# Router (not yet converted tools only)
 # ---------------------------------------------------------------------------
 
 async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "usd_read_layer_metadata":
-        return await _handle_read_layer_metadata(arguments)
     if name == "usd_write_layer_metadata":
         return await _handle_write_layer_metadata(arguments)
     if name == "usd_create_expressions_layer":
         return await _handle_create_expressions_layer(arguments)
-    if name == "usd_read_hierarchy":
-        return await _handle_read_hierarchy(arguments)
-    if name == "usd_read_hierarchy_composed":
-        return await _handle_read_hierarchy_composed(arguments)
-    if name == "usd_read_composition_arcs":
-        return await _handle_read_composition_arcs(arguments)
     if name == "usd_replace_anchors":
         return await _handle_replace_anchors(arguments)
     if name == "usd_add_sublayers":
@@ -590,28 +473,13 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_insert_sublayers(arguments)
     if name == "usd_remove_sublayers":
         return await _handle_remove_sublayers(arguments)
-    if name == "usd_read_cameras":
-        return await _handle_read_cameras(arguments)
     if name == "usd_stitch_clips":
         return await _handle_stitch_clips(arguments)
-    if name == "usd_read_prim_attributes":
-        return await _handle_read_prim_attributes(arguments)
-    if name == "usd_read_attribute_value":
-        return await _handle_read_attribute_value(arguments)
     raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
 
 # ---------------------------------------------------------------------------
-# Handlers
+# Handlers (not yet converted tools only)
 # ---------------------------------------------------------------------------
-
-async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    try:
-        result = read_layer_metadata(path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
 
 async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
     path = _require_str(arguments, "path")
@@ -633,35 +501,6 @@ async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextCo
         raise MCPError(types.INVALID_PARAMS, "'expression_variables' must be an object")
     try:
         result = create_expressions_layer(output_path, expression_variables)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    max_depth = to_int(arguments.get("max_depth", 0), "max_depth")
-    try:
-        result = read_layer_hierarchy(path, max_depth=max_depth)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    max_depth = to_int(arguments.get("max_depth", 0), "max_depth")
-    try:
-        result = read_composed_hierarchy(path, max_depth=max_depth)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    try:
-        result = read_composition_arcs(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
@@ -724,16 +563,6 @@ async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
         raise _usd_error(e) from e
 
 
-async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    frame_raw = arguments.get("frame")
-    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
-    try:
-        result = read_cameras(path, frame=frame)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
 async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     import os
     filepath_template = _require_str(arguments, "filepath_template")
@@ -778,37 +607,6 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
         )
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, StitchClipsError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    prim_path = _require_str(arguments, "prim_path")
-    detail = str(arguments.get("detail", "types"))
-    filter_prefix = _optional_str(arguments, "filter")
-    limit = to_int(arguments.get("limit", 200), "limit")
-    frame_raw = arguments.get("frame")
-    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
-    load_payloads = bool(arguments.get("load_payloads", False))
-    try:
-        result = read_prim_attributes(path, prim_path, detail=detail, filter_prefix=filter_prefix, limit=limit, frame=frame, load_payloads=load_payloads)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError, ValueError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_attribute_value(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    prim_path = _require_str(arguments, "prim_path")
-    attribute_name = _require_str(arguments, "attribute_name")
-    frame_raw = arguments.get("frame")
-    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
-    max_elements = to_int(arguments.get("max_elements", 100), "max_elements")
-    load_payloads = bool(arguments.get("load_payloads", False))
-    try:
-        result = read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 

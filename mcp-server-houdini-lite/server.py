@@ -10,11 +10,13 @@ Aggregates tools from domain-specific handler modules:
 from mcp.server import MCPServer
 
 import bgeo_handlers
+import usd_handlers
 import vdb_handlers
 
 app = MCPServer("houdini-lite")
 
 bgeo_handlers.register(app)
+usd_handlers.register(app)
 vdb_handlers.register(app)
 
 
