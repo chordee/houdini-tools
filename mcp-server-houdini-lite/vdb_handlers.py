@@ -9,6 +9,8 @@ from pathlib import Path
 import mcp.types as types
 from mcp.shared.exceptions import MCPError
 
+from handler_args import to_float, to_int
+
 from vdb_tools import VdbParseError, read_vdb_inspect
 from vdb_clips import VdbStitchError, stitch_vdb_volume_usd
 
@@ -174,9 +176,9 @@ async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
     if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
         raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
 
-    frame_range     = (int(frame_range_raw[0]), int(frame_range_raw[1]))
+    frame_range     = (to_int(frame_range_raw[0], "frame_range"), to_int(frame_range_raw[1], "frame_range"))
     probe_frame_raw = arguments.get("probe_frame")
-    probe_frame     = int(probe_frame_raw) if probe_frame_raw is not None else None
+    probe_frame     = to_int(probe_frame_raw, "probe_frame") if probe_frame_raw is not None else None
     grids_raw       = arguments.get("grids")
     grids           = [str(g) for g in grids_raw] if isinstance(grids_raw, list) else None
     strict          = bool(arguments.get("strict", False))

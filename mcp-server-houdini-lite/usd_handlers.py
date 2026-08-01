@@ -7,6 +7,8 @@ import json
 import mcp.types as types
 from mcp.shared.exceptions import MCPError
 
+from handler_args import to_float, to_int
+
 from usd_tools import (
     UsdOpenError,
     add_sublayers,
@@ -638,7 +640,7 @@ async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextCo
 
 async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
     path = _require_str(arguments, "path")
-    max_depth = int(arguments.get("max_depth", 0))
+    max_depth = to_int(arguments.get("max_depth", 0), "max_depth")
     try:
         result = read_layer_hierarchy(path, max_depth=max_depth)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -648,7 +650,7 @@ async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
 
 async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextContent]:
     path = _require_str(arguments, "path")
-    max_depth = int(arguments.get("max_depth", 0))
+    max_depth = to_int(arguments.get("max_depth", 0), "max_depth")
     try:
         result = read_composed_hierarchy(path, max_depth=max_depth)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -725,7 +727,7 @@ async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
 async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
     path = _require_str(arguments, "path")
     frame_raw = arguments.get("frame")
-    frame = float(frame_raw) if frame_raw is not None else None
+    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
     try:
         result = read_cameras(path, frame=frame)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -741,10 +743,10 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
 
     if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
         raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
-    frame_range = (int(frame_range_raw[0]), int(frame_range_raw[1]))
+    frame_range = (to_int(frame_range_raw[0], "frame_range"), to_int(frame_range_raw[1], "frame_range"))
 
     scene_range_raw  = arguments.get("scene_range")
-    scene_range      = (int(scene_range_raw[0]), int(scene_range_raw[1])) if scene_range_raw else None
+    scene_range      = (to_int(scene_range_raw[0], "scene_range"), to_int(scene_range_raw[1], "scene_range")) if scene_range_raw else None
     loop             = bool(arguments.get("loop", False))
     clip_set         = str(arguments.get("clip_set", "default"))
     clip_primpath    = _optional_str(arguments, "clip_primpath")
@@ -752,10 +754,10 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     gen_topology     = bool(arguments.get("gen_topology", True))
     gen_manifest     = bool(arguments.get("gen_manifest", True))
     probe_frame_raw  = arguments.get("probe_frame")
-    probe_frame      = int(probe_frame_raw) if probe_frame_raw is not None else None
+    probe_frame      = to_int(probe_frame_raw, "probe_frame") if probe_frame_raw is not None else None
     auto_detect_prim = bool(arguments.get("auto_detect_prim", True))
     fps_raw          = arguments.get("fps")
-    fps              = float(fps_raw) if fps_raw is not None else None
+    fps              = to_float(fps_raw, "fps") if fps_raw is not None else None
 
     try:
         result = stitch_clips(
@@ -784,9 +786,9 @@ async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextConten
     prim_path = _require_str(arguments, "prim_path")
     detail = str(arguments.get("detail", "types"))
     filter_prefix = _optional_str(arguments, "filter")
-    limit = int(arguments.get("limit", 200))
+    limit = to_int(arguments.get("limit", 200), "limit")
     frame_raw = arguments.get("frame")
-    frame = float(frame_raw) if frame_raw is not None else None
+    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
     load_payloads = bool(arguments.get("load_payloads", False))
     try:
         result = read_prim_attributes(path, prim_path, detail=detail, filter_prefix=filter_prefix, limit=limit, frame=frame, load_payloads=load_payloads)
@@ -800,8 +802,8 @@ async def _handle_read_attribute_value(arguments: dict) -> list[types.TextConten
     prim_path = _require_str(arguments, "prim_path")
     attribute_name = _require_str(arguments, "attribute_name")
     frame_raw = arguments.get("frame")
-    frame = float(frame_raw) if frame_raw is not None else None
-    max_elements = int(arguments.get("max_elements", 100))
+    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
+    max_elements = to_int(arguments.get("max_elements", 100), "max_elements")
     load_payloads = bool(arguments.get("load_payloads", False))
     try:
         result = read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
