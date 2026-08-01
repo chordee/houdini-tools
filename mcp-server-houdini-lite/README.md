@@ -863,9 +863,10 @@ Add the following to your `claude_desktop_config.json`:
     "houdini-lite": {
       "command": "uv",
       "args": [
+        "run",
+        "--no-sync",
         "--directory",
         "/path/to/mcp-server-houdini-lite",
-        "run",
         "server.py"
       ]
     }
