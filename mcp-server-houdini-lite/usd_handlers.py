@@ -43,6 +43,12 @@ def register(mcp: MCPServer) -> None:
     mcp.tool()(usd_read_cameras)
     mcp.tool()(usd_read_prim_attributes)
     mcp.tool()(usd_read_attribute_value)
+    mcp.tool()(usd_write_layer_metadata)
+    mcp.tool()(usd_create_expressions_layer)
+    mcp.tool()(usd_replace_anchors)
+    mcp.tool()(usd_add_sublayers)
+    mcp.tool()(usd_insert_sublayers)
+    mcp.tool()(usd_remove_sublayers)
 
 
 def usd_read_layer_metadata(
@@ -129,249 +135,83 @@ def usd_read_attribute_value(
         raise _usd_error(e) from e
 
 
+def usd_write_layer_metadata(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    metadata: Annotated[dict, Field(description="Map of metadata field name to new value. Allowed fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, expressionVariables. Value null clears the field.")],
+    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Update layer-level metadata on a USD layer. Only fields present in the 'metadata' argument are touched; unmentioned fields are left as-is. A field value of null clears the field back to its unauthored state. Dict-valued fields (customLayerData / expressionVariables) are fully replaced. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, and the extension determines format — so this can also convert .usda <-> .usdc). expressionVariables values are restricted to str / bool / int / homogeneous list of those."""
+    try:
+        return write_layer_metadata(path, metadata, output_path=output_path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_create_expressions_layer(
+    output_path: Annotated[str, Field(min_length=1, description="Absolute path to the new USD layer (must not exist)")],
+    expression_variables: Annotated[dict, Field(description="Non-empty dict of variable name to value")],
+) -> dict:
+    """Create a new USD layer at output_path containing ONLY the given expressionVariables metadata (no prims, no other layer metadata). Useful for pipeline config layers that are sublayered or referenced by other USDs to inject variables. expression_variables values are restricted to str / bool / int / homogeneous list of those. output_path must not already exist; file format is determined by the extension (.usd / .usda / .usdc)."""
+    try:
+        return create_expressions_layer(output_path, expression_variables)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_replace_anchors(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file to modify")],
+    replacements: Annotated[dict[str, str], Field(description="Map of {old_asset_path: new_asset_path}. Keys must match the exact strings stored in the USD file (as returned by usd_read_composition_arcs).")],
+) -> dict:
+    """Replace multiple anchor asset paths (sublayers, references, payloads) in a single USD layer file in one operation. Edits the file in-place. Use usd_read_composition_arcs first to inspect existing anchors."""
+    try:
+        return replace_anchors(path, replacements)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_add_sublayers(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to add. Stored as-is — pass the exact string you want to appear in subLayerPaths.")],
+    position: Annotated[Literal["prepend", "append"], Field(description="'prepend' = insert at the top of subLayerPaths (strongest); 'append' = insert at the bottom (weakest).")],
+    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Add one or more sublayer asset paths to a USD layer's subLayerPaths list. position='prepend' puts the new entries at the top (strongest), so for input ['A','B','C'] the final list is ['A','B','C', ...existing]. position='append' puts them at the bottom (weakest), so final = [...existing, 'A','B','C']. Entries whose string is already present are skipped (no-op) and reported in 'skipped'; anonymous identifiers (starting with 'anon:') are rejected. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, must not already exist; extension decides format)."""
+    try:
+        return add_sublayers(path, sublayers, position, output_path=output_path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_insert_sublayers(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to insert (stored as-is).")],
+    index: Annotated[int, Field(ge=0, description="0-based insertion index. Must be in [0, len(existing_subLayerPaths)] inclusive.")],
+    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Insert one or more sublayer asset paths at an explicit position in a USD layer's subLayerPaths. 'index' is 0-based against the current list length: 0 = top (strongest, same as usd_add_sublayers prepend), len(existing) = bottom (weakest, same as append). Values outside [0, len] — including negatives — raise. Multiple entries inserted at index i preserve input order and land at i, i+1, i+2, ... Same dedup and anonymous-identifier rejection as usd_add_sublayers. By default saves in-place; pass 'output_path' to export to a new file instead."""
+    try:
+        return insert_sublayers(path, sublayers, index, output_path=output_path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_remove_sublayers(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to remove (exact string match).")],
+    output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Remove one or more sublayer asset paths from a USD layer's subLayerPaths list. Matches the exact stored strings (same strings returned by usd_read_composition_arcs). Entries not found are silently skipped and reported in 'not_found' — no error is raised, so partial removals always succeed. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched)."""
+    try:
+        return remove_sublayers(path, sublayers, output_path=output_path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
 # ---------------------------------------------------------------------------
-# Tool definitions (not yet converted — Task 5 / Task 6)
+# Tool definitions (not yet converted — Task 6)
 # ---------------------------------------------------------------------------
 
 TOOLS = [
-    types.Tool(
-        name="usd_write_layer_metadata",
-        description=(
-            "Update layer-level metadata on a USD layer. Only fields "
-            "present in the 'metadata' argument are touched; unmentioned "
-            "fields are left as-is. A field value of null clears the "
-            "field back to its unauthored state. Dict-valued fields "
-            "(customLayerData / expressionVariables) are fully replaced. "
-            "By default the file is saved in-place; pass 'output_path' "
-            "to export to a new file instead (source is not touched, and "
-            "the extension determines format — so this can also convert "
-            ".usda <-> .usdc). expressionVariables values are restricted "
-            "to str / bool / int / homogeneous list of those."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "metadata"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "metadata": {
-                    "type": "object",
-                    "description": (
-                        "Map of metadata field name to new value. Allowed "
-                        "fields: defaultPrim, startTimeCode, endTimeCode, "
-                        "framesPerSecond, timeCodesPerSecond, metersPerUnit, "
-                        "upAxis, customLayerData, expressionVariables. "
-                        "Value null clears the field."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_create_expressions_layer",
-        description=(
-            "Create a new USD layer at output_path containing ONLY the "
-            "given expressionVariables metadata (no prims, no other "
-            "layer metadata). Useful for pipeline config layers that "
-            "are sublayered or referenced by other USDs to inject "
-            "variables. expression_variables values are restricted to "
-            "str / bool / int / homogeneous list of those. output_path "
-            "must not already exist; file format is determined by the "
-            "extension (.usd / .usda / .usdc)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["output_path", "expression_variables"],
-            "properties": {
-                "output_path": {
-                    "type": "string",
-                    "description": "Absolute path to the new USD layer (must not exist)",
-                },
-                "expression_variables": {
-                    "type": "object",
-                    "description": "Non-empty dict of variable name to value",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_replace_anchors",
-        description=(
-            "Replace multiple anchor asset paths (sublayers, references, payloads) "
-            "in a single USD layer file in one operation. "
-            "Edits the file in-place. "
-            "Use usd_read_composition_arcs first to inspect existing anchors."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "replacements"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file to modify",
-                },
-                "replacements": {
-                    "type": "object",
-                    "description": (
-                        "Map of {old_asset_path: new_asset_path}. "
-                        "Keys must match the exact strings stored in the USD file "
-                        "(as returned by usd_read_composition_arcs)."
-                    ),
-                    "additionalProperties": {"type": "string"},
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_add_sublayers",
-        description=(
-            "Add one or more sublayer asset paths to a USD layer's "
-            "subLayerPaths list. position='prepend' puts the new entries "
-            "at the top (strongest), so for input ['A','B','C'] the final "
-            "list is ['A','B','C', ...existing]. position='append' puts "
-            "them at the bottom (weakest), so final = [...existing, 'A','B','C']. "
-            "Entries whose string is already present are skipped (no-op) "
-            "and reported in 'skipped'; anonymous identifiers (starting "
-            "with 'anon:') are rejected. By default the file is saved in-place; "
-            "pass 'output_path' to export to a new file instead (source is not "
-            "touched, must not already exist; extension decides format)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "sublayers", "position"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "sublayers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "description": (
-                        "Non-empty list of sublayer asset path strings to add. "
-                        "Stored as-is — pass the exact string you want to "
-                        "appear in subLayerPaths."
-                    ),
-                },
-                "position": {
-                    "type": "string",
-                    "enum": ["prepend", "append"],
-                    "description": (
-                        "'prepend' = insert at the top of subLayerPaths "
-                        "(strongest); 'append' = insert at the bottom "
-                        "(weakest)."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_insert_sublayers",
-        description=(
-            "Insert one or more sublayer asset paths at an explicit position "
-            "in a USD layer's subLayerPaths. 'index' is 0-based against the "
-            "current list length: 0 = top (strongest, same as "
-            "usd_add_sublayers prepend), len(existing) = bottom (weakest, "
-            "same as append). Values outside [0, len] — including negatives "
-            "— raise. Multiple entries inserted at index i preserve input "
-            "order and land at i, i+1, i+2, ... Same dedup and anonymous-"
-            "identifier rejection as usd_add_sublayers. By default saves in-"
-            "place; pass 'output_path' to export to a new file instead."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "sublayers", "index"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "sublayers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "description": (
-                        "Non-empty list of sublayer asset path strings to "
-                        "insert (stored as-is)."
-                    ),
-                },
-                "index": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": (
-                        "0-based insertion index. Must be in "
-                        "[0, len(existing_subLayerPaths)] inclusive."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_remove_sublayers",
-        description=(
-            "Remove one or more sublayer asset paths from a USD layer's "
-            "subLayerPaths list. Matches the exact stored strings (same "
-            "strings returned by usd_read_composition_arcs). Entries not "
-            "found are silently skipped and reported in 'not_found' — no "
-            "error is raised, so partial removals always succeed. "
-            "By default the file is saved in-place; pass 'output_path' to "
-            "export to a new file instead (source is not touched)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "sublayers"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "sublayers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "description": (
-                        "Non-empty list of sublayer asset path strings to "
-                        "remove (exact string match)."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
     types.Tool(
         name="usd_stitch_clips",
         description=(
@@ -461,18 +301,6 @@ TOOLS = [
 # ---------------------------------------------------------------------------
 
 async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "usd_write_layer_metadata":
-        return await _handle_write_layer_metadata(arguments)
-    if name == "usd_create_expressions_layer":
-        return await _handle_create_expressions_layer(arguments)
-    if name == "usd_replace_anchors":
-        return await _handle_replace_anchors(arguments)
-    if name == "usd_add_sublayers":
-        return await _handle_add_sublayers(arguments)
-    if name == "usd_insert_sublayers":
-        return await _handle_insert_sublayers(arguments)
-    if name == "usd_remove_sublayers":
-        return await _handle_remove_sublayers(arguments)
     if name == "usd_stitch_clips":
         return await _handle_stitch_clips(arguments)
     raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
@@ -480,88 +308,6 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
 # ---------------------------------------------------------------------------
 # Handlers (not yet converted tools only)
 # ---------------------------------------------------------------------------
-
-async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    metadata = arguments.get("metadata")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(metadata, dict):
-        raise MCPError(types.INVALID_PARAMS, "'metadata' must be an object")
-    try:
-        result = write_layer_metadata(path, metadata, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextContent]:
-    output_path = _require_str(arguments, "output_path")
-    expression_variables = arguments.get("expression_variables")
-    if not isinstance(expression_variables, dict):
-        raise MCPError(types.INVALID_PARAMS, "'expression_variables' must be an object")
-    try:
-        result = create_expressions_layer(output_path, expression_variables)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    replacements = arguments.get("replacements")
-    if replacements is None:
-        replacements = {}
-    elif not isinstance(replacements, dict):
-        raise MCPError(types.INVALID_PARAMS, "replacements must be an object")
-    try:
-        result = replace_anchors(path, replacements)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    sublayers = arguments.get("sublayers")
-    position = _require_str(arguments, "position")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(sublayers, list):
-        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
-    try:
-        result = add_sublayers(path, sublayers, position, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_insert_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    sublayers = arguments.get("sublayers")
-    index = arguments.get("index")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(sublayers, list):
-        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
-    if not isinstance(index, int) or isinstance(index, bool):
-        raise MCPError(types.INVALID_PARAMS, "'index' must be an integer")
-    try:
-        result = insert_sublayers(path, sublayers, index, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    sublayers = arguments.get("sublayers")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(sublayers, list):
-        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
-    try:
-        result = remove_sublayers(path, sublayers, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e) from e
-
 
 async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     import os
