@@ -5,7 +5,7 @@ description = "MCP server for Houdini pipeline tools"
 requires-python = ">=3.11"
 dependencies = [
     "blosc>=1.11.0,<2.0",
-    "mcp>=1.0.0",
+    "mcp>=2.0.0,<3",
     "usd-core>=26.3",
 ]
 

@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 import mcp.types as types
+from mcp.shared.exceptions import MCPError
 
 from bgeo_reader import BgeoHeader, InvalidMagicError, ParseError, parse_header, parse_inspect
 from blosc_io import BloscDecompressError, read_first_chunk
@@ -176,7 +177,7 @@ async def call_bgeo_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_stitch_bgeo_clips(arguments)
     if name == "bgeo_inspect":
         return await _handle_inspect(arguments)
-    raise ValueError(f"unknown bgeo tool: {name}")
+    raise MCPError(types.METHOD_NOT_FOUND, f"unknown bgeo tool: {name}")
 
 # ---------------------------------------------------------------------------
 # bgeo_read_header
@@ -199,13 +200,13 @@ async def _handle_read_header(arguments: dict) -> list[types.TextContent]:
         result = _header_to_dict(header, path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError:
-        raise ValueError(f"file not found: {path}")
+        raise MCPError(types.INVALID_PARAMS, f"file not found: {path}")
     except InvalidMagicError:
-        raise ValueError("invalid bgeo magic")
+        raise MCPError(types.INVALID_PARAMS, "invalid bgeo magic")
     except BloscDecompressError:
-        raise ValueError("blosc decompression failed")
+        raise MCPError(types.INVALID_PARAMS, "blosc decompression failed")
     except ParseError as e:
-        raise ValueError(f"bgeo parse error: {e}")
+        raise MCPError(types.INVALID_PARAMS, f"bgeo parse error: {e}")
 
 # ---------------------------------------------------------------------------
 # bgeo_inspect
@@ -219,13 +220,13 @@ async def _handle_inspect(arguments: dict) -> list[types.TextContent]:
         result["path"] = path
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError:
-        raise ValueError(f"file not found: {path}")
+        raise MCPError(types.INVALID_PARAMS, f"file not found: {path}")
     except InvalidMagicError:
-        raise ValueError("invalid bgeo magic")
+        raise MCPError(types.INVALID_PARAMS, "invalid bgeo magic")
     except BloscDecompressError:
-        raise ValueError("blosc decompression failed")
+        raise MCPError(types.INVALID_PARAMS, "blosc decompression failed")
     except ParseError as e:
-        raise ValueError(f"bgeo parse error: {e}")
+        raise MCPError(types.INVALID_PARAMS, f"bgeo parse error: {e}")
 
 # ---------------------------------------------------------------------------
 # bgeo_list_sequence
@@ -240,7 +241,7 @@ async def _handle_list_sequence(arguments: dict) -> list[types.TextContent]:
 
     dir_path = Path(directory)
     if not dir_path.is_dir():
-        raise ValueError(f"[-32602] directory not found: {directory}")
+        raise MCPError(types.INVALID_PARAMS, f"directory not found: {directory}")
 
     files = sorted(dir_path.glob(pattern))
     sequences: dict[str, list[dict]] = {}
@@ -291,7 +292,7 @@ async def _handle_stitch_bgeo_clips(arguments: dict) -> list[types.TextContent]:
     output_path       = arguments.get("output_path", "")
 
     if not filepath_template or not output_path:
-        raise ValueError("[-32602] filepath_template and output_path are required")
+        raise MCPError(types.INVALID_PARAMS, "filepath_template and output_path are required")
 
     frame_range_raw  = arguments.get("frame_range")
     frame_range      = (int(frame_range_raw[0]), int(frame_range_raw[1])) if isinstance(frame_range_raw, list) and len(frame_range_raw) == 2 else None
@@ -310,9 +311,9 @@ async def _handle_stitch_bgeo_clips(arguments: dict) -> list[types.TextContent]:
     try:
         fps = float(fps_raw)
     except (TypeError, ValueError) as err:
-        raise ValueError(f"[-32602] invalid fps: {fps_raw!r}") from err
+        raise MCPError(types.INVALID_PARAMS, f"invalid fps: {fps_raw!r}") from err
     if not math.isfinite(fps) or fps <= 0:
-        raise ValueError(f"[-32602] fps must be a finite positive number, got: {fps!r}")
+        raise MCPError(types.INVALID_PARAMS, f"fps must be a finite positive number, got: {fps!r}")
 
     try:
         result = stitch_bgeo_clips(
@@ -332,6 +333,6 @@ async def _handle_stitch_bgeo_clips(arguments: dict) -> list[types.TextContent]:
         )
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError as e:
-        raise ValueError(f"[-32602] {e}")
+        raise MCPError(types.INVALID_PARAMS, str(e))
     except BgeoClipsError as e:
-        raise ValueError(f"[-32600] {e}")
+        raise MCPError(types.INVALID_REQUEST, str(e))

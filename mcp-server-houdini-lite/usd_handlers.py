@@ -5,6 +5,7 @@ usd_handlers.py — MCP tool definitions and handlers for USD tools
 import json
 
 import mcp.types as types
+from mcp.shared.exceptions import MCPError
 
 from usd_tools import (
     UsdOpenError,
@@ -595,7 +596,7 @@ async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_read_prim_attributes(arguments)
     if name == "usd_read_attribute_value":
         return await _handle_read_attribute_value(arguments)
-    raise ValueError(f"unknown usd tool: {name}")
+    raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
 
 # ---------------------------------------------------------------------------
 # Handlers
@@ -615,7 +616,7 @@ async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextConten
     metadata = arguments.get("metadata")
     output_path = _optional_str(arguments, "output_path")
     if not isinstance(metadata, dict):
-        raise ValueError("[-32602] 'metadata' must be an object")
+        raise MCPError(types.INVALID_PARAMS, "'metadata' must be an object")
     try:
         result = write_layer_metadata(path, metadata, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -627,7 +628,7 @@ async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextCo
     output_path = _require_str(arguments, "output_path")
     expression_variables = arguments.get("expression_variables")
     if not isinstance(expression_variables, dict):
-        raise ValueError("[-32602] 'expression_variables' must be an object")
+        raise MCPError(types.INVALID_PARAMS, "'expression_variables' must be an object")
     try:
         result = create_expressions_layer(output_path, expression_variables)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -670,7 +671,7 @@ async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
     if replacements is None:
         replacements = {}
     elif not isinstance(replacements, dict):
-        raise ValueError("[-32602] replacements must be an object")
+        raise MCPError(types.INVALID_PARAMS, "replacements must be an object")
     try:
         result = replace_anchors(path, replacements)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -684,7 +685,7 @@ async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
     position = _require_str(arguments, "position")
     output_path = _optional_str(arguments, "output_path")
     if not isinstance(sublayers, list):
-        raise ValueError("[-32602] 'sublayers' must be an array")
+        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
     try:
         result = add_sublayers(path, sublayers, position, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -698,9 +699,9 @@ async def _handle_insert_sublayers(arguments: dict) -> list[types.TextContent]:
     index = arguments.get("index")
     output_path = _optional_str(arguments, "output_path")
     if not isinstance(sublayers, list):
-        raise ValueError("[-32602] 'sublayers' must be an array")
+        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
     if not isinstance(index, int) or isinstance(index, bool):
-        raise ValueError("[-32602] 'index' must be an integer")
+        raise MCPError(types.INVALID_PARAMS, "'index' must be an integer")
     try:
         result = insert_sublayers(path, sublayers, index, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -713,7 +714,7 @@ async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
     sublayers = arguments.get("sublayers")
     output_path = _optional_str(arguments, "output_path")
     if not isinstance(sublayers, list):
-        raise ValueError("[-32602] 'sublayers' must be an array")
+        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
     try:
         result = remove_sublayers(path, sublayers, output_path=output_path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
@@ -739,7 +740,7 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     frame_range_raw   = arguments.get("frame_range")
 
     if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
-        raise ValueError("[-32602] frame_range must be a [start, end] integer array")
+        raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
     frame_range = (int(frame_range_raw[0]), int(frame_range_raw[1]))
 
     scene_range_raw  = arguments.get("scene_range")
@@ -813,15 +814,15 @@ async def _handle_read_attribute_value(arguments: dict) -> list[types.TextConten
 # Error helper
 # ---------------------------------------------------------------------------
 
-def _usd_error(e: Exception) -> ValueError:
-    code = -32602 if isinstance(e, FileNotFoundError) else -32600
-    return ValueError(f"[{code}] {e}")
+def _usd_error(e: Exception) -> MCPError:
+    code = types.INVALID_PARAMS if isinstance(e, FileNotFoundError) else types.INVALID_REQUEST
+    return MCPError(code, str(e))
 
 
 def _require_str(arguments: dict, key: str) -> str:
     v = arguments.get(key)
     if not isinstance(v, str) or not v:
-        raise ValueError(f"[-32602] '{key}' is required and must be a non-empty string")
+        raise MCPError(types.INVALID_PARAMS, f"'{key}' is required and must be a non-empty string")
     return v
 
 
@@ -830,5 +831,5 @@ def _optional_str(arguments: dict, key: str) -> str | None:
     if v is None or v == "":
         return None
     if not isinstance(v, str):
-        raise ValueError(f"[-32602] '{key}' must be a string if provided")
+        raise MCPError(types.INVALID_PARAMS, f"'{key}' must be a string if provided")
     return v

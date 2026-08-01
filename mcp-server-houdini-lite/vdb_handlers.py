@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import mcp.types as types
+from mcp.shared.exceptions import MCPError
 
 from vdb_tools import VdbParseError, read_vdb_inspect
 from vdb_clips import VdbStitchError, stitch_vdb_volume_usd
@@ -133,7 +134,7 @@ async def call_vdb_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _handle_list_sequence(arguments)
     if name == "vdb_stitch_volume_usd":
         return await _handle_stitch_volume_usd(arguments)
-    raise ValueError(f"unknown vdb tool: {name}")
+    raise MCPError(types.METHOD_NOT_FOUND, f"unknown vdb tool: {name}")
 
 
 # ---------------------------------------------------------------------------
@@ -143,14 +144,14 @@ async def call_vdb_tool(name: str, arguments: dict) -> list[types.TextContent]:
 async def _handle_inspect(arguments: dict) -> list[types.TextContent]:
     path = arguments.get("path", "")
     if not path:
-        raise ValueError("[-32602] 'path' is required")
+        raise MCPError(types.INVALID_PARAMS, "'path' is required")
     try:
         result = read_vdb_inspect(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError as e:
-        raise ValueError(f"[-32602] {e}") from e
+        raise MCPError(types.INVALID_PARAMS, str(e)) from e
     except VdbParseError as e:
-        raise ValueError(f"[-32600] {e}") from e
+        raise MCPError(types.INVALID_REQUEST, str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +166,13 @@ async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
     parent_primpath   = arguments.get("parent_primpath", "")
 
     if not filepath_template or not output_path or not volume_name or not parent_primpath:
-        raise ValueError(
-            "[-32602] filepath_template, output_path, volume_name, "
+        raise MCPError(
+            types.INVALID_PARAMS,
+            "filepath_template, output_path, volume_name, "
             "and parent_primpath are required"
         )
     if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
-        raise ValueError("[-32602] frame_range must be a [start, end] integer array")
+        raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
 
     frame_range     = (int(frame_range_raw[0]), int(frame_range_raw[1]))
     probe_frame_raw = arguments.get("probe_frame")
@@ -192,9 +194,9 @@ async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
         )
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError as e:
-        raise ValueError(f"[-32602] {e}") from e
+        raise MCPError(types.INVALID_PARAMS, str(e)) from e
     except VdbStitchError as e:
-        raise ValueError(f"[-32600] {e}") from e
+        raise MCPError(types.INVALID_REQUEST, str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +212,7 @@ async def _handle_list_sequence(arguments: dict) -> list[types.TextContent]:
 
     dir_path = Path(directory)
     if not dir_path.is_dir():
-        raise ValueError(f"[-32602] directory not found: {directory}")
+        raise MCPError(types.INVALID_PARAMS, f"directory not found: {directory}")
 
     files = sorted(dir_path.glob(pattern))
     sequences: dict[str, list[dict]] = {}
