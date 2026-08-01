@@ -113,7 +113,7 @@ def bgeo_stitch_usd_clips(
     gen_manifest: Annotated[bool, Field(description="Auto-generate manifest.usd from bgeo point attributes. Default: true")] = True,
     probe_frame: Annotated[int | None, Field(description="Frame number to use as probe for topology/manifest. Defaults to first frame.")] = None,
     probe_file: Annotated[str | None, Field(description="Absolute path to a specific .bgeo.sc to use as probe. Overrides probe_frame.")] = None,
-    fps: Annotated[float, Field(gt=0, description="Output stage FPS. Default: 24")] = 24.0,
+    fps: Annotated[float, Field(gt=0, allow_inf_nan=False, description="Output stage FPS. Default: 24")] = 24.0,
 ) -> dict:
     """Stitch per-frame .bgeo.sc cache files into a USD Value Clips stage. Reads usdconfigpathprefix and usdconfigsampleframe detail attributes from the .bgeo.sc files to auto-configure primpath and frame mapping. The output USD file references the original .bgeo.sc files as clip assets — a Houdini environment (or bgeo USD plugin) is required to load the geometry."""
     try:
