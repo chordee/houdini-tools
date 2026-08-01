@@ -244,38 +244,9 @@ def usd_stitch_clips(
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions (all converted)
-# ---------------------------------------------------------------------------
-
-TOOLS = []
-
-# ---------------------------------------------------------------------------
-# Router (all converted)
-# ---------------------------------------------------------------------------
-
-async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
-
-# ---------------------------------------------------------------------------
 # Error helper
 # ---------------------------------------------------------------------------
 
 def _usd_error(e: Exception) -> MCPError:
     code = types.INVALID_PARAMS if isinstance(e, FileNotFoundError) else types.INVALID_REQUEST
     return MCPError(code, str(e))
-
-
-def _require_str(arguments: dict, key: str) -> str:
-    v = arguments.get(key)
-    if not isinstance(v, str) or not v:
-        raise MCPError(types.INVALID_PARAMS, f"'{key}' is required and must be a non-empty string")
-    return v
-
-
-def _optional_str(arguments: dict, key: str) -> str | None:
-    v = arguments.get(key)
-    if v is None or v == "":
-        return None
-    if not isinstance(v, str):
-        raise MCPError(types.INVALID_PARAMS, f"'{key}' must be a string if provided")
-    return v
