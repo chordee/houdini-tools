@@ -610,7 +610,7 @@ async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent
         result = read_layer_metadata(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
@@ -645,7 +645,7 @@ async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
         result = read_layer_hierarchy(path, max_depth=max_depth)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextContent]:
@@ -655,7 +655,7 @@ async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextCon
         result = read_composed_hierarchy(path, max_depth=max_depth)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextContent]:
@@ -664,7 +664,7 @@ async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextConte
         result = read_composition_arcs(path)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
@@ -678,7 +678,7 @@ async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
         result = replace_anchors(path, replacements)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
@@ -732,7 +732,7 @@ async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
         result = read_cameras(path, frame=frame)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
     import os
@@ -778,7 +778,7 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
         )
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, StitchClipsError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextContent]:
@@ -794,7 +794,7 @@ async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextConten
         result = read_prim_attributes(path, prim_path, detail=detail, filter_prefix=filter_prefix, limit=limit, frame=frame, load_payloads=load_payloads)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError, ValueError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 async def _handle_read_attribute_value(arguments: dict) -> list[types.TextContent]:
@@ -809,7 +809,7 @@ async def _handle_read_attribute_value(arguments: dict) -> list[types.TextConten
         result = read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
         return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, UsdOpenError) as e:
-        raise _usd_error(e)
+        raise _usd_error(e) from e
 
 
 # ---------------------------------------------------------------------------

@@ -470,7 +470,7 @@ def stitch_bgeo_clips(
         else:
             filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]
     except KeyError as e:
-        raise BgeoClipsError(f"frame {e} not found in scan result during loop expansion")
+        raise BgeoClipsError(f"frame {e} not found in scan result during loop expansion") from e
 
     print(f"[INFO] Scene frames: {scene_frames[0]}–{scene_frames[-1]}  ({len(scene_frames)} frames)")
 
