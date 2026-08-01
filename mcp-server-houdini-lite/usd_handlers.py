@@ -185,7 +185,7 @@ def usd_add_sublayers(
 def usd_insert_sublayers(
     path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
     sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to insert (stored as-is).")],
-    index: Annotated[int, Field(ge=0, description="0-based insertion index. Must be in [0, len(existing_subLayerPaths)] inclusive.")],
+    index: Annotated[int, Field(ge=0, strict=True, description="0-based insertion index. Must be in [0, len(existing_subLayerPaths)] inclusive.")],
     output_path: Annotated[str | None, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
 ) -> dict:
     """Insert one or more sublayer asset paths at an explicit position in a USD layer's subLayerPaths. 'index' is 0-based against the current list length: 0 = top (strongest, same as usd_add_sublayers prepend), len(existing) = bottom (weakest, same as append). Values outside [0, len] — including negatives — raise. Multiple entries inserted at index i preserve input order and land at i, i+1, i+2, ... Same dedup and anonymous-identifier rejection as usd_add_sublayers. By default saves in-place; pass 'output_path' to export to a new file instead."""
