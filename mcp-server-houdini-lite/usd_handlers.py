@@ -103,7 +103,7 @@ def usd_read_prim_attributes(
     prim_path: Annotated[str, Field(min_length=1, description="USD scene path of the prim to inspect (e.g. /Geo/mesh)")],
     detail: Annotated[Literal["names", "types", "samples"], Field(description="'names' → attribute names only; 'types' → add type_name, variability, is_array, array_size; 'samples' → also add has_time_samples, time_sample_count")] = "types",
     filter: Annotated[str | None, Field(description="Return only attributes whose name starts with this prefix (e.g. 'primvars:')")] = None,
-    limit: Annotated[int, Field(ge=0, description="Maximum number of attributes to return (default 200)")] = 200,
+    limit: Annotated[int, Field(description="Maximum number of attributes to return (default 200)")] = 200,
     frame: Annotated[float | None, Field(description="Time code used to evaluate array_size. Omit for default time.")] = None,
     load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the target prim is defined inside a payload. Default: false.")] = False,
 ) -> dict:
