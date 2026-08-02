@@ -733,7 +733,9 @@ Stitches per-frame USD cache files into a single USD Value Clips stage. Automati
 | `gen_manifest` | boolean | no | Auto-generate `*.manifest.usd` (default: `true`) |
 | `probe_frame` | integer | no | Frame used to build topology/manifest (default: first frame) |
 | `auto_detect_prim` | boolean | no | Recursively detect animated child prims (default: `true`) |
-| `fps` | number | no | Output stage FPS (default: auto-detected from probe frame) |
+| `fps` | number | no | Output stage FPS, must be finite and positive (default: auto-detected from the probe frame's `timeCodesPerSecond`) |
+
+`fps` is written to the output stage as `timeCodesPerSecond` and `framesPerSecond`. USD stores whatever it is given without validating it, so a zero, negative or non-finite value would produce a stage declaring a nonsense frame rate while the call reported success — clip playback timing would be wrong in any consumer, even though the geometry itself still resolves. Such values are rejected instead, whether passed explicitly or auto-detected from a probe frame whose own `timeCodesPerSecond` is invalid.
 
 **Output** (JSON)
 
