@@ -7,6 +7,7 @@ Auto-generates topology.usd and manifest.usd alongside the output.
 Adapted from stitch_usd_clips.py (standalone CLI tool).
 """
 
+import math
 import os
 import re
 
@@ -24,6 +25,14 @@ class StitchClipsError(Exception):
 # ---------------------------------------------------------------------------
 # Path token resolver
 # ---------------------------------------------------------------------------
+
+def _validate_fps(fps: float, source: str) -> None:
+    """USD writes timeCodesPerSecond verbatim without validating it, so a zero,
+    negative or non-finite value yields a stage with a nonsense frame rate and
+    no error. Reject it here, whether it was passed in or auto-detected."""
+    if not math.isfinite(fps) or fps <= 0:
+        raise StitchClipsError(f"{source} must be a finite positive number, got: {fps!r}")
+
 
 def resolve_filepath(template: str, frame: int) -> str:
     """
@@ -256,6 +265,9 @@ def stitch_clips(
         FileNotFoundError  — probe frame file does not exist
         StitchClipsError   — invalid arguments or USD operation failed
     """
+    if fps is not None:
+        _validate_fps(fps, "fps")
+
     if scene_range is None:
         scene_range = frame_range
 
@@ -287,6 +299,17 @@ def stitch_clips(
         probe_path = filepaths[0]
         print(f"[INFO] Probe frame  : {probe_frame} (default — first frame)")
 
+    # --- 3b. Resolve fps now, before anything is written ---
+    # Auto-detection needs the probe frame, but validating it after topology,
+    # manifest and the output stage exist would leave that partial output behind.
+    if fps is None:
+        src = Usd.Stage.Open(probe_path)
+        fps = src.GetTimeCodesPerSecond()
+        _validate_fps(fps, f"fps auto-detected from timeCodesPerSecond of probe frame {probe_path}")
+        print(f"[INFO] FPS auto-detected : {fps} (from probe frame)")
+    else:
+        print(f"[INFO] FPS (manual)      : {fps}")
+
     # --- 4. Auto-detect animated child prims ---
     if auto_detect_prim:
         target_primpaths = find_all_animated_prims(probe_path, primpath)
@@ -314,12 +337,6 @@ def stitch_clips(
     stage.SetStartTimeCode(scene_frames[0])
     stage.SetEndTimeCode(scene_frames[-1])
 
-    if fps is None:
-        src = Usd.Stage.Open(probe_path)
-        fps = src.GetTimeCodesPerSecond()
-        print(f"[INFO] FPS auto-detected : {fps} (from probe frame)")
-    else:
-        print(f"[INFO] FPS (manual)      : {fps}")
     stage.SetTimeCodesPerSecond(fps)
     stage.SetFramesPerSecond(fps)
 

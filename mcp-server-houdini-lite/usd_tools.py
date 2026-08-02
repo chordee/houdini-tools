@@ -23,7 +23,7 @@ Write functions:
 
 from pathlib import Path
 
-from pxr import Sdf, Usd, UsdGeom, Gf, Vt
+from pxr import Sdf, Tf, Usd, UsdGeom, Gf, Vt
 
 # Collect all Gf quaternion types (Quath was added in later USD versions)
 _GF_QUAT_TYPES = tuple(
@@ -102,9 +102,7 @@ def read_layer_metadata(path: str) -> dict:
         UsdOpenError       — file could not be opened as a USD layer
     """
     _assert_exists(path)
-    layer = Sdf.Layer.FindOrOpen(path)
-    if layer is None:
-        raise UsdOpenError(f"could not open USD layer: {path}")
+    layer = _open_layer(path)
 
     result = {
         "path": path,
@@ -220,9 +218,7 @@ def write_layer_metadata(
         )
 
     _assert_exists(path)
-    source = Sdf.Layer.FindOrOpen(path)
-    if source is None:
-        raise UsdOpenError(f"could not open USD layer: {path}")
+    source = _open_layer(path)
 
     if output_path is not None and Path(output_path).exists():
         raise UsdOpenError(
@@ -338,9 +334,7 @@ def read_layer_hierarchy(path: str, max_depth: int = 0) -> dict:
         UsdOpenError       — file could not be opened as a USD layer
     """
     _assert_exists(path)
-    layer = Sdf.Layer.FindOrOpen(path)
-    if layer is None:
-        raise UsdOpenError(f"could not open USD layer: {path}")
+    layer = _open_layer(path)
 
     prims = []
 
@@ -389,9 +383,7 @@ def read_composed_hierarchy(path: str, max_depth: int = 0) -> dict:
         UsdOpenError       — stage could not be opened
     """
     _assert_exists(path)
-    stage = Usd.Stage.Open(path, load=Usd.Stage.LoadNone)
-    if stage is None:
-        raise UsdOpenError(f"could not open USD stage: {path}")
+    stage = _open_stage(path, load=Usd.Stage.LoadNone)
 
     prims = []
     for prim in stage.TraverseAll():
@@ -431,9 +423,7 @@ def read_composition_arcs(path: str) -> dict:
         UsdOpenError       — file could not be opened as a USD layer
     """
     _assert_exists(path)
-    layer = Sdf.Layer.FindOrOpen(path)
-    if layer is None:
-        raise UsdOpenError(f"could not open USD layer: {path}")
+    layer = _open_layer(path)
 
     sublayers = list(layer.subLayerPaths)
 
@@ -491,9 +481,7 @@ def replace_anchors(path: str, replacements: dict[str, str]) -> dict:
         UsdOpenError      — file could not be opened as a USD layer
     """
     _assert_exists(path)
-    layer = Sdf.Layer.FindOrOpen(path)
-    if layer is None:
-        raise UsdOpenError(f"could not open USD layer: {path}")
+    layer = _open_layer(path)
 
     replaced: list[dict] = []
 
@@ -575,9 +563,7 @@ def read_cameras(path: str, frame: float | None = None) -> dict:
         UsdOpenError       — stage could not be opened
     """
     _assert_exists(path)
-    stage = Usd.Stage.Open(path, load=Usd.Stage.LoadNone)
-    if stage is None:
-        raise UsdOpenError(f"could not open USD stage: {path}")
+    stage = _open_stage(path, load=Usd.Stage.LoadNone)
 
     time = Usd.TimeCode(frame) if frame is not None else Usd.TimeCode.Default()
     cameras = []
@@ -634,9 +620,7 @@ def read_prim_attributes(
         raise UsdOpenError("prim_path must not be empty")
     _assert_exists(path)
     load = Usd.Stage.LoadAll if load_payloads else Usd.Stage.LoadNone
-    stage = Usd.Stage.Open(path, load=load)
-    if stage is None:
-        raise UsdOpenError(f"could not open USD stage: {path}")
+    stage = _open_stage(path, load=load)
 
     prim = stage.GetPrimAtPath(Sdf.Path(prim_path))
     if not prim.IsValid():
@@ -704,9 +688,7 @@ def read_attribute_value(
         raise UsdOpenError("attribute_name must not be empty")
     _assert_exists(path)
     load = Usd.Stage.LoadAll if load_payloads else Usd.Stage.LoadNone
-    stage = Usd.Stage.Open(path, load=load)
-    if stage is None:
-        raise UsdOpenError(f"could not open USD stage: {path}")
+    stage = _open_stage(path, load=load)
 
     prim = stage.GetPrimAtPath(Sdf.Path(prim_path))
     if not prim.IsValid():
@@ -823,6 +805,33 @@ def _assert_exists(path: str) -> None:
         raise FileNotFoundError(f"file not found: {path}")
 
 
+def _open_layer(path: str) -> Sdf.Layer:
+    """Open a layer, reporting any failure as UsdOpenError.
+
+    A malformed file makes USD raise Tf.ErrorException rather than return None,
+    so the None check alone does not honour the UsdOpenError contract these
+    functions document.
+    """
+    try:
+        layer = Sdf.Layer.FindOrOpen(path)
+    except Tf.ErrorException as e:
+        raise UsdOpenError(f"could not open USD layer: {path}") from e
+    if layer is None:
+        raise UsdOpenError(f"could not open USD layer: {path}")
+    return layer
+
+
+def _open_stage(path: str, **kwargs) -> Usd.Stage:
+    """Open a stage, reporting any failure as UsdOpenError. See _open_layer."""
+    try:
+        stage = Usd.Stage.Open(path, **kwargs)
+    except Tf.ErrorException as e:
+        raise UsdOpenError(f"could not open USD stage: {path}") from e
+    if stage is None:
+        raise UsdOpenError(f"could not open USD stage: {path}")
+    return stage
+
+
 def _validate_sublayers_arg(sublayers) -> list[str]:
     if not isinstance(sublayers, list) or not sublayers:
         raise UsdOpenError("sublayers must be a non-empty list of strings")
@@ -843,9 +852,7 @@ def _open_layer_for_write(path: str, output_path: str | None):
     cache for `path` with edits that never reach disk for that path.
     """
     _assert_exists(path)
-    source = Sdf.Layer.FindOrOpen(path)
-    if source is None:
-        raise UsdOpenError(f"could not open USD layer: {path}")
+    source = _open_layer(path)
 
     if output_path is not None and Path(output_path).exists():
         raise UsdOpenError(

@@ -733,7 +733,9 @@ Stitches per-frame USD cache files into a single USD Value Clips stage. Automati
 | `gen_manifest` | boolean | no | Auto-generate `*.manifest.usd` (default: `true`) |
 | `probe_frame` | integer | no | Frame used to build topology/manifest (default: first frame) |
 | `auto_detect_prim` | boolean | no | Recursively detect animated child prims (default: `true`) |
-| `fps` | number | no | Output stage FPS (default: auto-detected from probe frame) |
+| `fps` | number | no | Output stage FPS, must be finite and positive (default: auto-detected from the probe frame's `timeCodesPerSecond`) |
+
+`fps` is written to the output stage as `timeCodesPerSecond` and `framesPerSecond`. USD stores whatever it is given without validating it, so a zero, negative or non-finite value would produce a stage declaring a nonsense frame rate while the call reported success — clip playback timing would be wrong in any consumer, even though the geometry itself still resolves. Such values are rejected instead, whether passed explicitly or auto-detected from a probe frame whose own `timeCodesPerSecond` is invalid.
 
 **Output** (JSON)
 
@@ -810,6 +812,34 @@ When `path` is present, every value must be an absolute USD path **and** a desce
   "missing_files": []
 }
 ```
+
+---
+
+## Error Behaviour
+
+Failures reach the caller through one of two channels, and which one carries a given failure is worth knowing when writing a client.
+
+**JSON-RPC error** — the tool recognised the problem and translated it deliberately. The response has no result; it carries a code and a message.
+
+| Code | Meaning | Example |
+|------|---------|---------|
+| `-32602` `INVALID_PARAMS` | The caller pointed at something unusable — a path that does not exist, a directory that is not a directory | `{"code": -32602, "message": "file not found: /cache/missing.bgeo.sc"}` |
+| `-32600` `INVALID_REQUEST` | The file was found but is not what it claims to be, or the operation was rejected | `{"code": -32600, "message": "not a valid VDB file (magic mismatch): /cache/broken.vdb"}`<br>`{"code": -32600, "message": "could not open USD layer: /scene/broken.usda"}` |
+
+**Error result** — a `CallToolResult` with `is_error: true` and the detail in its text content. Three things arrive this way:
+
+- **Argument validation.** Types, required parameters and value bounds are checked against each tool's schema before the tool body runs, and a failure is reported by the validator:
+  ```text
+  Error executing tool usd_read_hierarchy: 1 validation error for usd_read_hierarchyArguments
+  path
+    Field required [type=missing, input_value={}, input_type=dict]
+  ```
+- **An unknown tool name** — `Unknown tool: no_such_tool`.
+- **Anything a tool did not translate.** Exceptions the tool does not recognise are not converted to a code; the raw message is returned instead.
+
+A file that exists but cannot be read as what it claims to be lands on the JSON-RPC channel as `-32600`, whether it is a VDB or a USD layer — the two readers agree.
+
+Treat `is_error: true` and a JSON-RPC error as equally fatal. Do not infer from the channel whether a retry is worthwhile — infer that from the message.
 
 ---
 
