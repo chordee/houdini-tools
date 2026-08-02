@@ -11,7 +11,7 @@ import math
 import os
 import re
 
-from pxr import Usd, Sdf
+from pxr import Sdf, Tf, Usd
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +32,13 @@ def _validate_fps(fps: float, source: str) -> None:
     no error. Reject it here, whether it was passed in or auto-detected."""
     if not math.isfinite(fps) or fps <= 0:
         raise StitchClipsError(f"{source} must be a finite positive number, got: {fps!r}")
+
+
+def _validate_range(value: tuple[int, int], name: str) -> None:
+    if value[0] > value[1]:
+        raise StitchClipsError(
+            f"invalid {name}: start ({value[0]}) > end ({value[1]})"
+        )
 
 
 def resolve_filepath(template: str, frame: int) -> str:
@@ -265,6 +272,10 @@ def stitch_clips(
         FileNotFoundError  — probe frame file does not exist
         StitchClipsError   — invalid arguments or USD operation failed
     """
+    _validate_range(frame_range, "frame_range")
+    if scene_range is not None:
+        _validate_range(scene_range, "scene_range")
+
     if fps is not None:
         _validate_fps(fps, "fps")
 
@@ -299,16 +310,29 @@ def stitch_clips(
         probe_path = filepaths[0]
         print(f"[INFO] Probe frame  : {probe_frame} (default — first frame)")
 
+    if not os.path.exists(probe_path):
+        raise FileNotFoundError(f"probe frame file does not exist: {probe_path}")
+
+    try:
+        probe_stage = Usd.Stage.Open(probe_path)
+    except Tf.ErrorException as e:
+        raise StitchClipsError(f"could not open probe stage: {probe_path}") from e
+    if probe_stage is None:
+        raise StitchClipsError(f"could not open probe stage: {probe_path}")
+
     # --- 3b. Resolve fps now, before anything is written ---
     # Auto-detection needs the probe frame, but validating it after topology,
     # manifest and the output stage exist would leave that partial output behind.
     if fps is None:
-        src = Usd.Stage.Open(probe_path)
-        fps = src.GetTimeCodesPerSecond()
+        fps = probe_stage.GetTimeCodesPerSecond()
         _validate_fps(fps, f"fps auto-detected from timeCodesPerSecond of probe frame {probe_path}")
         print(f"[INFO] FPS auto-detected : {fps} (from probe frame)")
     else:
         print(f"[INFO] FPS (manual)      : {fps}")
+
+    for name, path in (("primpath", primpath), ("clip_primpath", clip_primpath)):
+        if not probe_stage.GetPrimAtPath(path).IsValid():
+            raise StitchClipsError(f"{name} not found in probe frame: {path}")
 
     # --- 4. Auto-detect animated child prims ---
     if auto_detect_prim:

@@ -1,0 +1,651 @@
+{
+  "bgeo_read_header": {
+    "description": "Read metadata from a Houdini .bgeo.sc geometry cache file without loading the full geometry. Returns point/prim counts.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a .bgeo.sc file"
+        }
+      }
+    }
+  },
+  "bgeo_list_sequence": {
+    "description": "Scan a directory for numbered .bgeo.sc files and group them into sequences by base name (the filename portion before the frame number). Multiple coexisting sequences in one directory are returned separately. Files whose frame number cannot be extracted are reported in 'unmatched'. No geometry data is read.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "directory"
+      ],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "description": "Directory path containing the cache sequence(s)"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern, default '*.bgeo.sc'",
+          "default": "*.bgeo.sc"
+        }
+      }
+    }
+  },
+  "bgeo_stitch_usd_clips": {
+    "description": "Stitch per-frame .bgeo.sc cache files into a USD Value Clips stage. Reads usdconfigpathprefix and usdconfigsampleframe detail attributes from the .bgeo.sc files to auto-configure primpath and frame mapping. The output USD file references the original .bgeo.sc files as clip assets — a Houdini environment (or bgeo USD plugin) is required to load the geometry.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "filepath_template",
+        "output_path"
+      ],
+      "properties": {
+        "filepath_template": {
+          "type": "string",
+          "description": "Per-frame path template. Supports {frame:04d} or $F4 format."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Absolute output path (.usd / .usda / .usdc)"
+        },
+        "frame_range": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[start, end] frame range. If omitted, auto-detected from usdconfigsampleframe attributes."
+        },
+        "primpath": {
+          "type": "string",
+          "description": "Prim path on the output stage. If omitted, auto-detected from usdconfigpathprefix."
+        },
+        "scene_range": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Scene timeline range [start, end]. Defaults to frame_range."
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "Loop file frames to fill scene_range. Default: false",
+          "default": false
+        },
+        "clip_set": {
+          "type": "string",
+          "description": "USD Clip Set name. Default: \"default\"",
+          "default": "default"
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "Abort if any source file is missing. Default: false",
+          "default": false
+        },
+        "gen_topology": {
+          "type": "boolean",
+          "description": "Auto-generate topology.usd from bgeo prim paths. Default: true",
+          "default": true
+        },
+        "gen_manifest": {
+          "type": "boolean",
+          "description": "Auto-generate manifest.usd from bgeo point attributes. Default: true",
+          "default": true
+        },
+        "probe_frame": {
+          "type": "integer",
+          "description": "Frame number to use as probe for topology/manifest. Defaults to first frame."
+        },
+        "probe_file": {
+          "type": "string",
+          "description": "Absolute path to a specific .bgeo.sc to use as probe. Overrides probe_frame."
+        },
+        "fps": {
+          "type": "number",
+          "description": "Output stage FPS. Default: 24",
+          "default": 24.0
+        }
+      }
+    }
+  },
+  "bgeo_inspect": {
+    "description": "Inspect a Houdini .bgeo.sc geometry cache file and return rich metadata without loading the full geometry. Returns point/prim/vertex counts, all attribute definitions (name, size, storage, values) for all four scopes (point, prim, vertex, detail), primitive types, prim paths, and file info (software, date, timetocook, attribute_summary). Reads only the first Blosc chunk — fast even for multi-GB files.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a .bgeo.sc file"
+        }
+      }
+    }
+  },
+  "usd_read_layer_metadata": {
+    "description": "Read layer-level metadata from a single USD layer file (.usd, .usda, .usdc, .usdz) without composition. Returns the file format and all standard layer metadata fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, and expressionVariables. A field that has not been authored in the file is reported as null (distinguishing 'unauthored' from a legitimate authored zero / empty value).",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file"
+        }
+      }
+    }
+  },
+  "usd_write_layer_metadata": {
+    "description": "Update layer-level metadata on a USD layer. Only fields present in the 'metadata' argument are touched; unmentioned fields are left as-is. A field value of null clears the field back to its unauthored state. Dict-valued fields (customLayerData / expressionVariables) are fully replaced. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, and the extension determines format — so this can also convert .usda <-> .usdc). expressionVariables values are restricted to str / bool / int / homogeneous list of those.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "metadata"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to an existing USD file to edit"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Map of metadata field name to new value. Allowed fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, expressionVariables. Value null clears the field."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched."
+        }
+      }
+    }
+  },
+  "usd_create_expressions_layer": {
+    "description": "Create a new USD layer at output_path containing ONLY the given expressionVariables metadata (no prims, no other layer metadata). Useful for pipeline config layers that are sublayered or referenced by other USDs to inject variables. expression_variables values are restricted to str / bool / int / homogeneous list of those. output_path must not already exist; file format is determined by the extension (.usd / .usda / .usdc).",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "output_path",
+        "expression_variables"
+      ],
+      "properties": {
+        "output_path": {
+          "type": "string",
+          "description": "Absolute path to the new USD layer (must not exist)"
+        },
+        "expression_variables": {
+          "type": "object",
+          "description": "Non-empty dict of variable name to value"
+        }
+      }
+    }
+  },
+  "usd_read_hierarchy": {
+    "description": "Read the prim hierarchy from a single USD layer without composition. References, sublayers, and payloads are NOT resolved — only prims defined directly in this file are returned. Fastest option for a quick structural overview of one file.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file"
+        },
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum hierarchy depth to return (0 = unlimited, 1 = root prims only, etc.)",
+          "default": 0
+        }
+      }
+    }
+  },
+  "usd_read_hierarchy_composed": {
+    "description": "Read the fully composed USD prim hierarchy, resolving all references and sublayers. Payloads are intentionally not loaded to keep memory usage low. Use this when you need to see the complete scene structure across multiple referenced files.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file"
+        },
+        "max_depth": {
+          "type": "integer",
+          "description": "Maximum hierarchy depth to return (0 = unlimited)",
+          "default": 0
+        }
+      }
+    }
+  },
+  "usd_read_composition_arcs": {
+    "description": "List the direct composition arcs declared in a single USD layer: sublayers, references, and payloads. No composition is performed — only arcs explicitly written in this file are returned. Use this to understand which other USD files this layer depends on.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file"
+        }
+      }
+    }
+  },
+  "usd_replace_anchors": {
+    "description": "Replace multiple anchor asset paths (sublayers, references, payloads) in a single USD layer file in one operation. Edits the file in-place. Use usd_read_composition_arcs first to inspect existing anchors.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "replacements"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file to modify"
+        },
+        "replacements": {
+          "type": "object",
+          "description": "Map of {old_asset_path: new_asset_path}. Keys must match the exact strings stored in the USD file (as returned by usd_read_composition_arcs).",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "usd_add_sublayers": {
+    "description": "Add one or more sublayer asset paths to a USD layer's subLayerPaths list. position='prepend' puts the new entries at the top (strongest), so for input ['A','B','C'] the final list is ['A','B','C', ...existing]. position='append' puts them at the bottom (weakest), so final = [...existing, 'A','B','C']. Entries whose string is already present are skipped (no-op) and reported in 'skipped'; anonymous identifiers (starting with 'anon:') are rejected. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, must not already exist; extension decides format).",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "sublayers",
+        "position"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to an existing USD file to edit"
+        },
+        "sublayers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Non-empty list of sublayer asset path strings to add. Stored as-is — pass the exact string you want to appear in subLayerPaths."
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "prepend",
+            "append"
+          ],
+          "description": "'prepend' = insert at the top of subLayerPaths (strongest); 'append' = insert at the bottom (weakest)."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched."
+        }
+      }
+    }
+  },
+  "usd_insert_sublayers": {
+    "description": "Insert one or more sublayer asset paths at an explicit position in a USD layer's subLayerPaths. 'index' is 0-based against the current list length: 0 = top (strongest, same as usd_add_sublayers prepend), len(existing) = bottom (weakest, same as append). Values outside [0, len] — including negatives — raise. Multiple entries inserted at index i preserve input order and land at i, i+1, i+2, ... Same dedup and anonymous-identifier rejection as usd_add_sublayers. By default saves in-place; pass 'output_path' to export to a new file instead.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "sublayers",
+        "index"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to an existing USD file to edit"
+        },
+        "sublayers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Non-empty list of sublayer asset path strings to insert (stored as-is)."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based insertion index. Must be in [0, len(existing_subLayerPaths)] inclusive."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched."
+        }
+      }
+    }
+  },
+  "usd_remove_sublayers": {
+    "description": "Remove one or more sublayer asset paths from a USD layer's subLayerPaths list. Matches the exact stored strings (same strings returned by usd_read_composition_arcs). Entries not found are silently skipped and reported in 'not_found' — no error is raised, so partial removals always succeed. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched).",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "sublayers"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to an existing USD file to edit"
+        },
+        "sublayers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Non-empty list of sublayer asset path strings to remove (exact string match)."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched."
+        }
+      }
+    }
+  },
+  "usd_stitch_clips": {
+    "description": "Stitch per-frame USD cache files into a single USD Value Clips stage. Automatically generates topology.usd and manifest.usd alongside the output. Supports frame looping, custom clip sets, and auto-detection of animated child prims.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "filepath_template",
+        "primpath",
+        "output_path",
+        "frame_range"
+      ],
+      "properties": {
+        "filepath_template": {
+          "type": "string",
+          "description": "Per-frame path template. Supports {frame:04d} or $F4 format."
+        },
+        "primpath": {
+          "type": "string",
+          "description": "Target prim path on the stage, e.g. /Geometry"
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Absolute output path (.usd / .usda / .usdc)"
+        },
+        "frame_range": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Source file frame range [start, end] (inclusive)"
+        },
+        "scene_range": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Scene timeline frame range [start, end]. Defaults to frame_range."
+        },
+        "loop": {
+          "type": "boolean",
+          "description": "Loop file frames to fill scene_range. Default: false",
+          "default": false
+        },
+        "clip_set": {
+          "type": "string",
+          "description": "USD Clip Set name. Default: \"default\"",
+          "default": "default"
+        },
+        "clip_primpath": {
+          "type": "string",
+          "description": "Prim path inside clip files. Defaults to primpath."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "Abort if any source file is missing. Default: false",
+          "default": false
+        },
+        "gen_topology": {
+          "type": "boolean",
+          "description": "Auto-generate topology.usd. Default: true",
+          "default": true
+        },
+        "gen_manifest": {
+          "type": "boolean",
+          "description": "Auto-generate manifest.usd. Default: true",
+          "default": true
+        },
+        "probe_frame": {
+          "type": "integer",
+          "description": "Frame used to generate topology/manifest. Defaults to first frame of frame_range."
+        },
+        "auto_detect_prim": {
+          "type": "boolean",
+          "description": "Recursively detect animated child prims. Default: true",
+          "default": true
+        },
+        "fps": {
+          "type": "number",
+          "description": "Output stage FPS. Auto-detected from probe frame if omitted."
+        }
+      }
+    }
+  },
+  "usd_read_prim_attributes": {
+    "description": "List attributes on a USD prim with progressive disclosure. Use detail='names' for a fast attribute name overview, 'types' (default) to add type info and array sizes, or 'samples' to also include time sample counts. Use filter to narrow by name prefix (e.g. 'primvars:'), and limit to cap the number of attributes returned.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "prim_path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file"
+        },
+        "prim_path": {
+          "type": "string",
+          "description": "USD scene path of the prim to inspect (e.g. /Geo/mesh)"
+        },
+        "detail": {
+          "type": "string",
+          "enum": [
+            "names",
+            "types",
+            "samples"
+          ],
+          "default": "types",
+          "description": "'names' → attribute names only; 'types' → add type_name, variability, is_array, array_size; 'samples' → also add has_time_samples, time_sample_count"
+        },
+        "filter": {
+          "type": "string",
+          "description": "Return only attributes whose name starts with this prefix (e.g. 'primvars:')"
+        },
+        "limit": {
+          "type": "integer",
+          "default": 200,
+          "description": "Maximum number of attributes to return (default 200)"
+        },
+        "frame": {
+          "type": "number",
+          "description": "Time code used to evaluate array_size. Omit for default time."
+        },
+        "load_payloads": {
+          "type": "boolean",
+          "default": false,
+          "description": "Load USD payloads. Required if the target prim is defined inside a payload. Default: false."
+        }
+      }
+    }
+  },
+  "usd_read_attribute_value": {
+    "description": "Read the value of a single named attribute on a USD prim. For array attributes, results are truncated to max_elements (default 100) to avoid large payloads; check array_total and array_truncated in the response.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path",
+        "prim_path",
+        "attribute_name"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file"
+        },
+        "prim_path": {
+          "type": "string",
+          "description": "USD scene path of the prim (e.g. /Geo/mesh)"
+        },
+        "attribute_name": {
+          "type": "string",
+          "description": "Name of the attribute to read (e.g. 'points', 'xformOp:translate')"
+        },
+        "frame": {
+          "type": "number",
+          "description": "Time code at which to evaluate the attribute. Omit for default time."
+        },
+        "max_elements": {
+          "type": "integer",
+          "default": 100,
+          "description": "Maximum array elements to return (default 100)"
+        },
+        "load_payloads": {
+          "type": "boolean",
+          "default": false,
+          "description": "Load USD payloads. Required if the target prim is defined inside a payload. Default: false."
+        }
+      }
+    }
+  },
+  "usd_read_cameras": {
+    "description": "Find all Camera prims in a USD scene and read their lens and projection attributes (focalLength, aperture, clippingRange, fStop, focusDistance, projection, shutter). The stage is fully composed — references and sublayers are resolved — but payloads are not loaded. Use this to inspect camera settings from any USD file.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a USD file (.usd, .usda, .usdc, .usdz)"
+        },
+        "frame": {
+          "type": "number",
+          "description": "Time code (frame number) at which to evaluate time-sampled attributes. Omit to use the default (static) value."
+        }
+      }
+    }
+  },
+  "vdb_inspect": {
+    "description": "Parse the header of an OpenVDB (.vdb) file and return its grids (name, raw grid type, friendly type label, instance parent) plus file-level metadata. Uses only the Python standard library — no pyopenvdb or Houdini required. No voxel data is loaded.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Absolute path to a .vdb file"
+        }
+      }
+    }
+  },
+  "vdb_stitch_volume_usd": {
+    "description": "Stitch a numbered .vdb sequence into a single USD file containing a UsdVol.Volume with one UsdVol.OpenVDBAsset per grid. The filePath, fieldName, and fieldIndex attributes are time-sampled across frame_range. Grids are auto-detected from the probe frame unless an explicit list is given. No Houdini required. This tool writes files to disk.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "filepath_template",
+        "output_path",
+        "frame_range",
+        "volume_name",
+        "parent_primpath"
+      ],
+      "properties": {
+        "filepath_template": {
+          "type": "string",
+          "description": "Per-frame template; supports {frame:04d} or $F4 format."
+        },
+        "output_path": {
+          "type": "string",
+          "description": "Absolute output path (.usd / .usda / .usdc). Must not already exist."
+        },
+        "frame_range": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[start, end] frame range (inclusive)."
+        },
+        "volume_name": {
+          "type": "string",
+          "description": "Name of the UsdVol.Volume prim (single path segment, no slashes)."
+        },
+        "parent_primpath": {
+          "type": "string",
+          "description": "Absolute USD path to the parent Xform, e.g. '/scene'. Created if missing."
+        },
+        "probe_frame": {
+          "type": "integer",
+          "description": "Frame used to detect grids. Defaults to start of frame_range."
+        },
+        "grids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Explicit grid names to include. Defaults to all grids from probe."
+        },
+        "strict": {
+          "type": "boolean",
+          "description": "Abort if any source file is missing. Default: false.",
+          "default": false
+        }
+      }
+    }
+  },
+  "vdb_list_sequence": {
+    "description": "Scan a directory for numbered .vdb files and group them into sequences by base name (the filename portion before the frame number). Multiple coexisting sequences in one directory are returned separately. Files whose frame number cannot be extracted are reported in 'unmatched'. No VDB headers are parsed.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "directory"
+      ],
+      "properties": {
+        "directory": {
+          "type": "string",
+          "description": "Directory path to scan"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern, default '*.vdb'",
+          "default": "*.vdb"
+        }
+      }
+    }
+  }
+}
