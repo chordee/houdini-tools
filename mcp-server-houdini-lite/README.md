@@ -4,6 +4,15 @@ A lightweight [MCP](https://modelcontextprotocol.io/) server for Houdini pipelin
 
 ---
 
+## Testing
+
+```bash
+uv sync --group dev
+uv run pytest
+```
+
+---
+
 ## Tools
 
 ### bgeo
@@ -788,7 +797,7 @@ When `path` is present, every value must be an absolute USD path **and** a desce
 | `frame_range` | [int, int] | no | Source file frame range `[start, end]`. Auto-detected from `usdconfigsampleframe` if omitted |
 | `primpath` | string | no | Prim path on the output stage. Auto-detected from `usdconfigpathprefix` if omitted |
 | `scene_range` | [int, int] | no | Scene timeline range (defaults to `frame_range`) |
-| `loop` | boolean | no | Loop file frames to fill `scene_range` (default: `false`) |
+| `loop` | boolean | no | Loop file frames to fill `scene_range`. When both ranges are omitted, the scanned timeline is preserved and `loop` has no effect (default: `false`) |
 | `clip_set` | string | no | USD Clip Set name (default: `"default"`) |
 | `strict` | boolean | no | Abort if any source file is missing (default: `false`) |
 | `gen_topology` | boolean | no | Auto-generate `*.topology.usd` (default: `true`) |
