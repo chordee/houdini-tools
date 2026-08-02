@@ -815,6 +815,34 @@ When `path` is present, every value must be an absolute USD path **and** a desce
 
 ---
 
+## Error Behaviour
+
+Failures reach the caller through one of two channels, and which one carries a given failure is worth knowing when writing a client.
+
+**JSON-RPC error** — the tool recognised the problem and translated it deliberately. The response has no result; it carries a code and a message.
+
+| Code | Meaning | Example |
+|------|---------|---------|
+| `-32602` `INVALID_PARAMS` | The caller pointed at something unusable — a path that does not exist, a directory that is not a directory | `{"code": -32602, "message": "file not found: /cache/missing.bgeo.sc"}` |
+| `-32600` `INVALID_REQUEST` | The file was found but is not what it claims to be, or the operation was rejected | `{"code": -32600, "message": "not a valid VDB file (magic mismatch): /cache/broken.vdb"}` |
+
+**Error result** — a `CallToolResult` with `is_error: true` and the detail in its text content. Three things arrive this way:
+
+- **Argument validation.** Types, required parameters and value bounds are checked against each tool's schema before the tool body runs, and a failure is reported by the validator:
+  ```
+  Error executing tool usd_read_hierarchy: 1 validation error for usd_read_hierarchyArguments
+  path
+    Field required [type=missing, input_value={}, input_type=dict]
+  ```
+- **An unknown tool name** — `Unknown tool: no_such_tool`.
+- **Anything a tool did not translate.** Exceptions the tool does not recognise are not converted to a code; the raw message is returned instead.
+
+That last case produces an inconsistency worth being aware of. Handing a malformed file to the VDB reader yields a translated `-32600`, because the parser raises an exception the tool recognises. Handing a malformed file to a USD reader yields an error *result* carrying a raw `pxr.Tf.ErrorException` message, because USD raises before the tool's own open-check is reached. Both reject the file; they simply do not agree on how to say so.
+
+Treat `is_error: true` and a JSON-RPC error as equally fatal. Do not infer from the channel whether a retry is worthwhile — infer that from the message.
+
+---
+
 ## Known Limitations — `bgeo_stitch_usd_clips`
 
 Surfaced by a USD + Houdini code review on 2026-05-15. Tracked here until a future pass.
