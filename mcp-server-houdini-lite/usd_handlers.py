@@ -224,7 +224,7 @@ def usd_stitch_clips(
     gen_manifest: Annotated[bool, Field(description="Auto-generate manifest.usd. Default: true")] = True,
     probe_frame: Annotated[int | None, Field(description="Frame used to generate topology/manifest. Defaults to first frame of frame_range.")] = None,
     auto_detect_prim: Annotated[bool, Field(description="Recursively detect animated child prims. Default: true")] = True,
-    fps: Annotated[float | None, Field(description="Output stage FPS. Auto-detected from probe frame if omitted.")] = None,
+    fps: Annotated[float | None, Field(gt=0, allow_inf_nan=False, description="Output stage FPS. Auto-detected from probe frame if omitted.")] = None,
 ) -> dict:
     """Stitch per-frame USD cache files into a single USD Value Clips stage. Automatically generates topology.usd and manifest.usd alongside the output. Supports frame looping, custom clip sets, and auto-detection of animated child prims."""
     try:
