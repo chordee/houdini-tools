@@ -65,6 +65,22 @@ def _resolve_frame(template: str, frame: int) -> str:
     return resolved
 
 
+_FRAME_TOKEN_RE = re.compile(r"\{frame(?::[^}]*)?\}|\$F\d*")
+
+
+def _template_filename_pattern(filepath_template: str) -> re.Pattern:
+    """Build a filename regex for the supported frame-token formats."""
+    filename = os.path.basename(filepath_template)
+    parts = []
+    position = 0
+    for match in _FRAME_TOKEN_RE.finditer(filename):
+        parts.append(re.escape(filename[position:match.start()]))
+        parts.append(r"-?\d+")
+        position = match.end()
+    parts.append(re.escape(filename[position:]))
+    return re.compile("^" + "".join(parts) + "$", re.IGNORECASE)
+
+
 def _scan_directory(filepath_template: str) -> dict[int, str]:
     """
     Scan the directory implied by filepath_template for all .bgeo.sc files,
@@ -74,17 +90,27 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
     if not os.path.isdir(directory):
         raise BgeoClipsError(f"directory not found: {directory}")
 
+    filename_pattern = _template_filename_pattern(filepath_template)
     frame_map: dict[int, str] = {}
     for fname in sorted(os.listdir(directory)):
-        if not fname.endswith(".bgeo.sc"):
+        if not filename_pattern.match(fname):
             continue
         fpath = os.path.join(directory, fname)
         try:
             meta = _read_meta(fpath)
-            if meta["sample_frame"] is not None:
-                frame_map[meta["sample_frame"]] = fpath
         except Exception as e:
             print(f"[WARNING] skipped unreadable file: {fname}: {e}")
+            continue
+
+        sample_frame = meta["sample_frame"]
+        if sample_frame is None:
+            continue
+        if sample_frame in frame_map:
+            raise BgeoClipsError(
+                f"duplicate usdconfigsampleframe {sample_frame}: "
+                f"{frame_map[sample_frame]} and {fpath}"
+            )
+        frame_map[sample_frame] = fpath
     return frame_map
 
 
@@ -348,7 +374,8 @@ def stitch_bgeo_clips(
         raise BgeoClipsError(f"fps must be a finite positive number, got: {fps!r}")
 
     # --- 1. Build frame map {scene_frame: bgeo_path} ---
-    if frame_range is None:
+    auto_detected_frame_range = frame_range is None
+    if auto_detected_frame_range:
         frame_map = _scan_directory(filepath_template)
         if not frame_map:
             raise BgeoClipsError(
@@ -440,7 +467,8 @@ def stitch_bgeo_clips(
             )
 
     # --- 5. Scene range and loop ---
-    if scene_range is None:
+    default_scene_range = scene_range is None
+    if default_scene_range:
         scene_range = frame_range
 
     if scene_range[0] > scene_range[1]:
@@ -458,14 +486,17 @@ def stitch_bgeo_clips(
         mul = scene_len // len(file_frames) + 1
         file_frames = (file_frames * mul)
 
-    scene_frames = list(range(scene_range[0], scene_range[1] + 1))
+    if auto_detected_frame_range and default_scene_range:
+        scene_frames = list(file_frames)
+    else:
+        scene_frames = list(range(scene_range[0], scene_range[1] + 1))
     paired = list(zip(scene_frames, file_frames))
     scene_frames = [p[0] for p in paired]
     file_frames  = [p[1] for p in paired]
     # rebuild filepaths to match (possibly looped) file_frames
     # for auto-detected frame_map, rebuild; otherwise use template
     try:
-        if frame_range is None:   # auto-detected → frame_map was built in step 1
+        if auto_detected_frame_range:
             filepaths = [frame_map[f] for f in file_frames]
         else:
             filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]

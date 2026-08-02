@@ -768,6 +768,8 @@ Stitches per-frame `.bgeo.sc` cache files into a USD Value Clips stage. The clip
 
 Automatically reads `usdconfigpathprefix` and `usdconfigsampleframe` detail attributes embedded in the `.bgeo.sc` files to configure the primpath and frame mapping without requiring the user to specify them.
 
+When `frame_range` is omitted, only filenames matching `filepath_template` are scanned. The scanned file paths are preserved even when `usdconfigsampleframe` differs from the frame number in the filename. If two matching files declare the same `usdconfigsampleframe`, the operation is rejected instead of choosing one silently.
+
 **Mesh prim path resolution**
 
 | Probe bgeo has `path` primitive attribute? | Resulting Mesh prim(s) |
@@ -848,7 +850,6 @@ Treat `is_error: true` and a JSON-RPC error as equally fatal. Do not infer from 
 Surfaced by a USD + Houdini code review on 2026-05-15. Tracked here until a future pass.
 
 - **Multi-segment `primpath` mis-resolves clip samples.** When `primpath` has more than one segment (e.g. `/Asset/Geo`), the main USD anchors the clips dictionary on the top prim (`/Asset`) but `primPath` inside the dict points at the full path (`/Asset/Geo`). USD value-clip resolution remaps descendants relative to the anchor, so a Mesh at `/Asset/Geo/mesh_0` gets looked up as `/Asset/Geo/Geo/mesh_0` in the clip file — wrong. Single-segment `primpath` (`/Geometry`, `/Geo`) works correctly. Workaround: keep `primpath` single-segment for now.
-- **`frame_range` auto-detection branch is dead-code in step 5.** `_scan_directory` builds a `frame_map`, then step 1 reassigns `frame_range`, so the later `if frame_range is None` check (used to choose between `frame_map` lookup and template resolution during loop expansion) never fires. No visible regression because `_resolve_frame` produces the same path, but the intent is broken.
 - **Mesh fallback name is hard-coded `mesh_0`.** Houdini's bgeo USD file format plugin synthesizes the fallback prim name from the SOP primitive type (`mesh_0` for polys, `points_0` for points, `sphere_0` for spheres, …). Mixed or non-poly caches without a `path` primitive attribute may not align with what the plugin produces at runtime.
 - **`Cd → primvars:displayColor` type mismatch.** Authored as `Float3[]`, but the runtime plugin emits `Color3f[]`. Topology / manifest typeName won't match the clip's authored typeName for this attribute; renderers usually tolerate this but `usdchecker` may warn.
 - **`path` mismatch is a stitcher-policy error, not a Houdini-malformed-data error.** Houdini's SOP Import LOP accepts absolute `path` values that don't share `usdconfigpathprefix` — the prefix is only applied to relative paths. This stitcher rejects that case because the resulting clip stage would be broken, but the error message describes the bgeo as "inconsistent USD configuration", which is stronger than reality.

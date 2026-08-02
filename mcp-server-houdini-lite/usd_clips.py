@@ -34,6 +34,13 @@ def _validate_fps(fps: float, source: str) -> None:
         raise StitchClipsError(f"{source} must be a finite positive number, got: {fps!r}")
 
 
+def _validate_range(value: tuple[int, int], name: str) -> None:
+    if value[0] > value[1]:
+        raise StitchClipsError(
+            f"invalid {name}: start ({value[0]}) > end ({value[1]})"
+        )
+
+
 def resolve_filepath(template: str, frame: int) -> str:
     """
     Supports two frame token formats:
@@ -265,6 +272,10 @@ def stitch_clips(
         FileNotFoundError  — probe frame file does not exist
         StitchClipsError   — invalid arguments or USD operation failed
     """
+    _validate_range(frame_range, "frame_range")
+    if scene_range is not None:
+        _validate_range(scene_range, "scene_range")
+
     if fps is not None:
         _validate_fps(fps, "fps")
 
@@ -309,6 +320,11 @@ def stitch_clips(
         print(f"[INFO] FPS auto-detected : {fps} (from probe frame)")
     else:
         print(f"[INFO] FPS (manual)      : {fps}")
+
+    probe_stage = Usd.Stage.Open(probe_path)
+    for name, path in (("primpath", primpath), ("clip_primpath", clip_primpath)):
+        if not probe_stage.GetPrimAtPath(path).IsValid():
+            raise StitchClipsError(f"{name} not found in probe frame: {path}")
 
     # --- 4. Auto-detect animated child prims ---
     if auto_detect_prim:
