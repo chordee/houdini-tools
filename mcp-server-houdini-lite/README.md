@@ -829,7 +829,7 @@ Failures reach the caller through one of two channels, and which one carries a g
 **Error result** — a `CallToolResult` with `is_error: true` and the detail in its text content. Three things arrive this way:
 
 - **Argument validation.** Types, required parameters and value bounds are checked against each tool's schema before the tool body runs, and a failure is reported by the validator:
-  ```
+  ```text
   Error executing tool usd_read_hierarchy: 1 validation error for usd_read_hierarchyArguments
   path
     Field required [type=missing, input_value={}, input_type=dict]
