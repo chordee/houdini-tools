@@ -10,7 +10,7 @@ the translated -32600 the VDB path returns for the same class of problem.
 import pytest
 from mcp.client.client import Client
 from mcp.shared.exceptions import MCPError
-from mcp.types import INVALID_REQUEST
+from mcp.types import INVALID_PARAMS, INVALID_REQUEST
 
 import server
 from usd_tools import (
@@ -63,4 +63,4 @@ async def test_a_missing_file_is_still_invalid_params_not_invalid_request(tmp_pa
         with pytest.raises(MCPError) as exc:
             await client.call_tool("usd_read_hierarchy", {"path": missing})
 
-    assert exc.value.code == -32602
+    assert exc.value.code == INVALID_PARAMS

@@ -10,8 +10,6 @@ from mcp.types import INTERNAL_ERROR, INVALID_PARAMS
 
 import server
 
-MISSING_PATH = "D:/does/not/exist/nowhere.bgeo.sc"
-
 BASELINE_PATH = Path(__file__).parent / "schema_baseline.json"
 with open(BASELINE_PATH, encoding="utf-8") as f:
     BASELINE_TOOL_NAMES = set(json.load(f).keys())
@@ -35,25 +33,27 @@ async def test_unknown_tool_is_reported_as_an_error_result():
 
 
 @pytest.mark.anyio
-async def test_missing_file_error_reaches_the_caller_intact():
+async def test_missing_file_error_reaches_the_caller_intact(tmp_path):
+    missing_path = str(tmp_path / "missing.bgeo.sc")
     async with Client(server.app) as client:
         with pytest.raises(MCPError) as exc:
-            await client.call_tool("bgeo_read_header", {"path": MISSING_PATH})
+            await client.call_tool("bgeo_read_header", {"path": missing_path})
 
     assert exc.value.code == INVALID_PARAMS
-    assert MISSING_PATH in exc.value.message
+    assert missing_path in exc.value.message
 
 
 @pytest.mark.anyio
-async def test_no_handler_error_degrades_to_opaque_internal_error():
+async def test_every_handler_error_keeps_a_diagnosable_code_and_message(tmp_path):
     """Every tool must fail with a diagnosable message, never a bare -32603."""
+    missing_dir = tmp_path / "missing"
     checks = [
-        ("bgeo_read_header", {"path": MISSING_PATH}),
-        ("bgeo_inspect", {"path": MISSING_PATH}),
-        ("bgeo_list_sequence", {"directory": "D:/does/not/exist"}),
-        ("vdb_inspect", {"path": "D:/does/not/exist/nowhere.vdb"}),
-        ("vdb_list_sequence", {"directory": "D:/does/not/exist"}),
-        ("usd_read_hierarchy", {"path": "D:/does/not/exist/nowhere.usda"}),
+        ("bgeo_read_header", {"path": str(missing_dir / "missing.bgeo.sc")}),
+        ("bgeo_inspect", {"path": str(missing_dir / "missing.bgeo.sc")}),
+        ("bgeo_list_sequence", {"directory": str(missing_dir)}),
+        ("vdb_inspect", {"path": str(missing_dir / "missing.vdb")}),
+        ("vdb_list_sequence", {"directory": str(missing_dir)}),
+        ("usd_read_hierarchy", {"path": str(missing_dir / "missing.usda")}),
     ]
 
     async with Client(server.app) as client:
@@ -83,22 +83,22 @@ async def test_reading_a_real_usd_layer_returns_parsable_json(tmp_path):
 
 
 NON_NUMERIC_ARGS = [
-    ("usd_read_hierarchy", {"path": "D:/x.usda", "max_depth": "deep"}),
-    ("usd_read_hierarchy_composed", {"path": "D:/x.usda", "max_depth": "deep"}),
-    ("usd_read_cameras", {"path": "D:/x.usda", "frame": "now"}),
-    ("usd_read_prim_attributes", {"path": "D:/x.usda", "prim_path": "/r", "limit": "many"}),
-    ("usd_read_prim_attributes", {"path": "D:/x.usda", "prim_path": "/r", "frame": "now"}),
+    ("usd_read_hierarchy", {"path": "/unused/x.usda", "max_depth": "deep"}),
+    ("usd_read_hierarchy_composed", {"path": "/unused/x.usda", "max_depth": "deep"}),
+    ("usd_read_cameras", {"path": "/unused/x.usda", "frame": "now"}),
+    ("usd_read_prim_attributes", {"path": "/unused/x.usda", "prim_path": "/r", "limit": "many"}),
+    ("usd_read_prim_attributes", {"path": "/unused/x.usda", "prim_path": "/r", "frame": "now"}),
     ("usd_read_attribute_value",
-     {"path": "D:/x.usda", "prim_path": "/r", "attribute_name": "a", "max_elements": "lots"}),
+     {"path": "/unused/x.usda", "prim_path": "/r", "attribute_name": "a", "max_elements": "lots"}),
     ("bgeo_stitch_usd_clips",
-     {"filepath_template": "D:/x.$F4.bgeo.sc", "output_path": "D:/o.usda", "frame_range": ["bad", 2]}),
+     {"filepath_template": "/unused/x.$F4.bgeo.sc", "output_path": "/unused/o.usda", "frame_range": ["bad", 2]}),
     ("bgeo_stitch_usd_clips",
-     {"filepath_template": "D:/x.$F4.bgeo.sc", "output_path": "D:/o.usda", "probe_frame": "abc"}),
+     {"filepath_template": "/unused/x.$F4.bgeo.sc", "output_path": "/unused/o.usda", "probe_frame": "abc"}),
     ("usd_stitch_clips",
-     {"filepath_template": "D:/x.$F4.usd", "output_path": "D:/o.usda", "primpath": "/r",
+     {"filepath_template": "/unused/x.$F4.usd", "output_path": "/unused/o.usda", "primpath": "/r",
       "frame_range": ["bad", 2]}),
     ("vdb_stitch_volume_usd",
-     {"filepath_template": "D:/x.$F4.vdb", "output_path": "D:/o.usda", "volume_name": "d",
+     {"filepath_template": "/unused/x.$F4.vdb", "output_path": "/unused/o.usda", "volume_name": "d",
       "parent_primpath": "/r", "frame_range": ["bad", 2]}),
 ]
 

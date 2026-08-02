@@ -75,11 +75,17 @@ async def test_usd_stitch_clips_tool_rejects_non_positive_fps(bad_fps, tmp_path)
 @pytest.mark.anyio
 async def test_usd_stitch_clips_tool_still_accepts_a_valid_fps(tmp_path):
     """Guards against fixing the bug by rejecting everything."""
+    for frame in (1, 2):
+        path = tmp_path / f"cache.{frame:04d}.usd"
+        stage = Usd.Stage.CreateNew(str(path))
+        UsdGeom.Xform.Define(stage, "/root")
+        stage.GetRootLayer().Save()
+
     async with Client(server.app) as client:
         result = await client.call_tool(
             "usd_stitch_clips",
             {
-                "filepath_template": str(tmp_path / "missing.$F4.usd"),
+                "filepath_template": str(tmp_path / "cache.$F4.usd"),
                 "primpath": "/root",
                 "output_path": str(tmp_path / "out.usda"),
                 "frame_range": [1, 2],
@@ -87,6 +93,4 @@ async def test_usd_stitch_clips_tool_still_accepts_a_valid_fps(tmp_path):
             },
         )
 
-    # The files do not exist, so this fails downstream — but it must get past
-    # fps validation to do so, and must not complain about fps.
-    assert "fps" not in result.content[0].text if result.is_error else True
+    assert result.is_error is False

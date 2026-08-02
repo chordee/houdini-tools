@@ -41,7 +41,9 @@ def test_bgeo_scan_rejects_duplicate_sample_frames(tmp_path, monkeypatch):
         bgeo_clips._scan_directory(str(tmp_path / "target.$F4.bgeo.sc"))
 
 
-def test_bgeo_auto_detection_preserves_scanned_asset_paths(tmp_path, monkeypatch):
+def test_bgeo_auto_detection_uses_sparse_scanned_timeline_even_with_loop(
+    tmp_path, monkeypatch
+):
     first_path = tmp_path / "target.0001.bgeo.sc"
     second_path = tmp_path / "target.0002.bgeo.sc"
     first_path.touch()
@@ -70,6 +72,7 @@ def test_bgeo_auto_detection_preserves_scanned_asset_paths(tmp_path, monkeypatch
         gen_topology=False,
         gen_manifest=False,
         strict=True,
+        loop=True,
     )
 
     assert captured["asset_paths"] == [str(first_path), str(second_path)]
@@ -112,6 +115,23 @@ def test_usd_stitch_rejects_missing_probe_prim_before_writing(tmp_path):
             primpath="/Missing",
             output_path=str(tmp_path / "out.usda"),
             frame_range=(1, 1),
+            fps=24.0,
+        )
+
+    assert list(tmp_path.glob("out*")) == []
+
+
+def test_usd_stitch_translates_malformed_probe_error_before_writing(tmp_path):
+    probe_path = tmp_path / "cache.1.usda"
+    probe_path.write_text("this is not usd\n", encoding="utf-8")
+
+    with pytest.raises(StitchClipsError, match="could not open probe stage"):
+        stitch_clips(
+            filepath_template=str(tmp_path / "cache.{frame}.usda"),
+            primpath="/root",
+            output_path=str(tmp_path / "out.usda"),
+            frame_range=(1, 1),
+            fps=24.0,
         )
 
     assert list(tmp_path.glob("out*")) == []

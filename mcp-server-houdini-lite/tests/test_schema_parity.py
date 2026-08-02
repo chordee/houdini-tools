@@ -4,7 +4,7 @@ import pytest
 
 import server
 from mcp.server import MCPServer
-from schema_tools import capture_tools, load_baseline
+from schema_tools import capture_tools, load_baseline, normalize_schema
 
 CONVERTED: list[str] = [
     "vdb_inspect", "vdb_stitch_volume_usd", "vdb_list_sequence",
@@ -25,15 +25,26 @@ def test_converted_names_exist_in_baseline():
     assert not missing, f"names in CONVERTED but absent from baseline: {missing}"
 
 
+def test_schema_normalizer_rejects_heterogeneous_tuple_items():
+    schema = {
+        "prefixItems": [
+            {"type": "integer"},
+            {"type": "string"},
+        ]
+    }
+
+    with pytest.raises(ValueError, match="heterogeneous tuple"):
+        normalize_schema(schema)
+
+
 @pytest.mark.anyio
 async def test_converted_matches_server_exposed_tools():
-    """CONVERTED must track server.app exactly once conversion has started.
+    """CONVERTED must track the tools exposed by the converted server.
 
-    Before Task 2, server.app is still the low-level mcp.server.Server exposing
-    every hand-written tool, and CONVERTED is empty by design — the guard is
-    inert in that state. From Task 2 onward, server.app becomes an MCPServer
-    that only registers converted modules, so its exposed tool names must equal
-    set(CONVERTED) exactly; a forgotten append would otherwise go unnoticed.
+    The guard skips only while server.app is the pre-conversion low-level
+    Server. Once it is an MCPServer, its exposed tool names must equal the
+    current CONVERTED list exactly; a forgotten list update would otherwise go
+    unnoticed.
     """
     if not isinstance(server.app, MCPServer):
         pytest.skip("server.app is not yet an MCPServer (pre-Task-2 state)")

@@ -18,7 +18,12 @@ def normalize_schema(schema: dict) -> dict:
         if key == "title":
             continue
         if key == "prefixItems":
-            out["items"] = normalize_schema(value[0]) if value else {}
+            normalized_items = [normalize_schema(item) for item in value]
+            if normalized_items and any(
+                item != normalized_items[0] for item in normalized_items[1:]
+            ):
+                raise ValueError("heterogeneous tuple schemas are not supported")
+            out["items"] = normalized_items[0] if normalized_items else {}
             out["minItems"] = len(value)
             out["maxItems"] = len(value)
             continue

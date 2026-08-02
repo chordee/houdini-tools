@@ -476,8 +476,13 @@ def stitch_bgeo_clips(
             f"invalid scene_range: start ({scene_range[0]}) > end ({scene_range[1]})"
         )
 
+    auto_scene_from_files = auto_detected_frame_range and default_scene_range
     _MAX_SCENE_FRAMES = 100_000
-    if loop and len(file_frames) < (scene_range[1] - scene_range[0] + 1):
+    if (
+        loop
+        and not auto_scene_from_files
+        and len(file_frames) < (scene_range[1] - scene_range[0] + 1)
+    ):
         scene_len = scene_range[1] - scene_range[0] + 1
         if scene_len > _MAX_SCENE_FRAMES:
             raise BgeoClipsError(
@@ -486,7 +491,7 @@ def stitch_bgeo_clips(
         mul = scene_len // len(file_frames) + 1
         file_frames = (file_frames * mul)
 
-    if auto_detected_frame_range and default_scene_range:
+    if auto_scene_from_files:
         scene_frames = list(file_frames)
     else:
         scene_frames = list(range(scene_range[0], scene_range[1] + 1))
