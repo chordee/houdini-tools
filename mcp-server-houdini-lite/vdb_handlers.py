@@ -2,189 +2,52 @@
 vdb_handlers.py — MCP tool definitions and handlers for VDB tools
 """
 
-import json
 import re
 from pathlib import Path
+from typing import Annotated
 
 import mcp.types as types
+from mcp.server import MCPServer
 from mcp.shared.exceptions import MCPError
-
-from handler_args import to_float, to_int
+from pydantic import Field
 
 from vdb_tools import VdbParseError, read_vdb_inspect
 from vdb_clips import VdbStitchError, stitch_vdb_volume_usd
 
-# ---------------------------------------------------------------------------
-# Tool definitions
-# ---------------------------------------------------------------------------
-
-TOOLS = [
-    types.Tool(
-        name="vdb_inspect",
-        description=(
-            "Parse the header of an OpenVDB (.vdb) file and return its grids "
-            "(name, raw grid type, friendly type label, instance parent) plus "
-            "file-level metadata. Uses only the Python standard library — no "
-            "pyopenvdb or Houdini required. No voxel data is loaded."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a .vdb file",
-                }
-            },
-        },
-    ),
-    types.Tool(
-        name="vdb_stitch_volume_usd",
-        description=(
-            "Stitch a numbered .vdb sequence into a single USD file "
-            "containing a UsdVol.Volume with one UsdVol.OpenVDBAsset per "
-            "grid. The filePath, fieldName, and fieldIndex attributes are "
-            "time-sampled across frame_range. Grids are auto-detected from "
-            "the probe frame unless an explicit list is given. No Houdini "
-            "required. This tool writes files to disk."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": [
-                "filepath_template",
-                "output_path",
-                "frame_range",
-                "volume_name",
-                "parent_primpath",
-            ],
-            "properties": {
-                "filepath_template": {
-                    "type": "string",
-                    "description": "Per-frame template; supports {frame:04d} or $F4 format.",
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": "Absolute output path (.usd / .usda / .usdc). Must not already exist.",
-                },
-                "frame_range": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "description": "[start, end] frame range (inclusive).",
-                },
-                "volume_name": {
-                    "type": "string",
-                    "description": "Name of the UsdVol.Volume prim (single path segment, no slashes).",
-                },
-                "parent_primpath": {
-                    "type": "string",
-                    "description": "Absolute USD path to the parent Xform, e.g. '/scene'. Created if missing.",
-                },
-                "probe_frame": {
-                    "type": "integer",
-                    "description": "Frame used to detect grids. Defaults to start of frame_range.",
-                },
-                "grids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Explicit grid names to include. Defaults to all grids from probe.",
-                },
-                "strict": {
-                    "type": "boolean",
-                    "description": "Abort if any source file is missing. Default: false.",
-                    "default": False,
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="vdb_list_sequence",
-        description=(
-            "Scan a directory for numbered .vdb files and group them into "
-            "sequences by base name (the filename portion before the frame "
-            "number). Multiple coexisting sequences in one directory are "
-            "returned separately. Files whose frame number cannot be extracted "
-            "are reported in 'unmatched'. No VDB headers are parsed."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["directory"],
-            "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Directory path to scan",
-                },
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern, default '*.vdb'",
-                    "default": "*.vdb",
-                },
-            },
-        },
-    ),
-]
-
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
-
-async def call_vdb_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "vdb_inspect":
-        return await _handle_inspect(arguments)
-    if name == "vdb_list_sequence":
-        return await _handle_list_sequence(arguments)
-    if name == "vdb_stitch_volume_usd":
-        return await _handle_stitch_volume_usd(arguments)
-    raise MCPError(types.METHOD_NOT_FOUND, f"unknown vdb tool: {name}")
+_VDB_FRAME_RE = re.compile(r"^(.*)\.(\d+)\.vdb$", re.IGNORECASE)
 
 
-# ---------------------------------------------------------------------------
-# vdb_inspect
-# ---------------------------------------------------------------------------
+def register(mcp: MCPServer) -> None:
+    mcp.tool()(vdb_inspect)
+    mcp.tool()(vdb_stitch_volume_usd)
+    mcp.tool()(vdb_list_sequence)
 
-async def _handle_inspect(arguments: dict) -> list[types.TextContent]:
-    path = arguments.get("path", "")
-    if not path:
-        raise MCPError(types.INVALID_PARAMS, "'path' is required")
+
+def vdb_inspect(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a .vdb file")],
+) -> dict:
+    """Parse the header of an OpenVDB (.vdb) file and return its grids (name, raw grid type, friendly type label, instance parent) plus file-level metadata. Uses only the Python standard library — no pyopenvdb or Houdini required. No voxel data is loaded."""
     try:
-        result = read_vdb_inspect(path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_vdb_inspect(path)
     except FileNotFoundError as e:
         raise MCPError(types.INVALID_PARAMS, str(e)) from e
     except VdbParseError as e:
         raise MCPError(types.INVALID_REQUEST, str(e)) from e
 
 
-# ---------------------------------------------------------------------------
-# vdb_stitch_volume_usd
-# ---------------------------------------------------------------------------
-
-async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
-    filepath_template = arguments.get("filepath_template", "")
-    output_path       = arguments.get("output_path", "")
-    frame_range_raw   = arguments.get("frame_range")
-    volume_name       = arguments.get("volume_name", "")
-    parent_primpath   = arguments.get("parent_primpath", "")
-
-    if not filepath_template or not output_path or not volume_name or not parent_primpath:
-        raise MCPError(
-            types.INVALID_PARAMS,
-            "filepath_template, output_path, volume_name, "
-            "and parent_primpath are required"
-        )
-    if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
-        raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
-
-    frame_range     = (to_int(frame_range_raw[0], "frame_range"), to_int(frame_range_raw[1], "frame_range"))
-    probe_frame_raw = arguments.get("probe_frame")
-    probe_frame     = to_int(probe_frame_raw, "probe_frame") if probe_frame_raw is not None else None
-    grids_raw       = arguments.get("grids")
-    grids           = [str(g) for g in grids_raw] if isinstance(grids_raw, list) else None
-    strict          = bool(arguments.get("strict", False))
-
+def vdb_stitch_volume_usd(
+    filepath_template: Annotated[str, Field(min_length=1, description="Per-frame template; supports {frame:04d} or $F4 format.")],
+    output_path: Annotated[str, Field(min_length=1, description="Absolute output path (.usd / .usda / .usdc). Must not already exist.")],
+    frame_range: Annotated[tuple[int, int], Field(description="[start, end] frame range (inclusive).")],
+    volume_name: Annotated[str, Field(min_length=1, description="Name of the UsdVol.Volume prim (single path segment, no slashes).")],
+    parent_primpath: Annotated[str, Field(min_length=1, description="Absolute USD path to the parent Xform, e.g. '/scene'. Created if missing.")],
+    probe_frame: Annotated[int | None, Field(description="Frame used to detect grids. Defaults to start of frame_range.")] = None,
+    grids: Annotated[list[str] | None, Field(description="Explicit grid names to include. Defaults to all grids from probe.")] = None,
+    strict: Annotated[bool, Field(description="Abort if any source file is missing. Default: false.")] = False,
+) -> dict:
+    """Stitch a numbered .vdb sequence into a single USD file containing a UsdVol.Volume with one UsdVol.OpenVDBAsset per grid. The filePath, fieldName, and fieldIndex attributes are time-sampled across frame_range. Grids are auto-detected from the probe frame unless an explicit list is given. No Houdini required. This tool writes files to disk."""
     try:
-        result = stitch_vdb_volume_usd(
+        return stitch_vdb_volume_usd(
             filepath_template=filepath_template,
             output_path=output_path,
             frame_range=frame_range,
@@ -194,24 +57,17 @@ async def _handle_stitch_volume_usd(arguments: dict) -> list[types.TextContent]:
             grids=grids,
             strict=strict,
         )
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except FileNotFoundError as e:
         raise MCPError(types.INVALID_PARAMS, str(e)) from e
     except VdbStitchError as e:
         raise MCPError(types.INVALID_REQUEST, str(e)) from e
 
 
-# ---------------------------------------------------------------------------
-# vdb_list_sequence
-# ---------------------------------------------------------------------------
-
-_VDB_FRAME_RE = re.compile(r"^(.*)\.(\d+)\.vdb$", re.IGNORECASE)
-
-
-async def _handle_list_sequence(arguments: dict) -> list[types.TextContent]:
-    directory = arguments.get("directory", "")
-    pattern = arguments.get("pattern", "*.vdb")
-
+def vdb_list_sequence(
+    directory: Annotated[str, Field(min_length=1, description="Directory path to scan")],
+    pattern: Annotated[str, Field(description="Glob pattern, default '*.vdb'")] = "*.vdb",
+) -> dict:
+    """Scan a directory for numbered .vdb files and group them into sequences by base name (the filename portion before the frame number). Multiple coexisting sequences in one directory are returned separately. Files whose frame number cannot be extracted are reported in 'unmatched'. No VDB headers are parsed."""
     dir_path = Path(directory)
     if not dir_path.is_dir():
         raise MCPError(types.INVALID_PARAMS, f"directory not found: {directory}")
@@ -247,10 +103,9 @@ async def _handle_list_sequence(arguments: dict) -> list[types.TextContent]:
             "frames":           frames,
         })
 
-    result = {
+    return {
         "directory":      directory,
         "sequence_count": len(out_sequences),
         "sequences":      out_sequences,
         "unmatched":      unmatched,
     }
-    return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]

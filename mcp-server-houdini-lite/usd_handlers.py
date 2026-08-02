@@ -2,12 +2,12 @@
 usd_handlers.py — MCP tool definitions and handlers for USD tools
 """
 
-import json
+from typing import Annotated, Literal
 
 import mcp.types as types
+from mcp.server import MCPServer
 from mcp.shared.exceptions import MCPError
-
-from handler_args import to_float, to_int
+from pydantic import BeforeValidator, Field
 
 from usd_tools import (
     UsdOpenError,
@@ -27,740 +27,208 @@ from usd_tools import (
 )
 from usd_clips import StitchClipsError, stitch_clips
 
-# ---------------------------------------------------------------------------
-# Tool definitions
-# ---------------------------------------------------------------------------
+# Optional string that treats "" as "not set", preserving the pre-migration
+# _optional_str() behaviour these parameters relied on.
+OptionalStr = Annotated[str | None, BeforeValidator(lambda v: None if v == "" else v)]
 
-TOOLS = [
-    types.Tool(
-        name="usd_read_layer_metadata",
-        description=(
-            "Read layer-level metadata from a single USD layer file "
-            "(.usd, .usda, .usdc, .usdz) without composition. Returns "
-            "the file format and all standard layer metadata fields: "
-            "defaultPrim, startTimeCode, endTimeCode, framesPerSecond, "
-            "timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, "
-            "and expressionVariables. A field that has not been authored "
-            "in the file is reported as null (distinguishing 'unauthored' "
-            "from a legitimate authored zero / empty value)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                }
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_write_layer_metadata",
-        description=(
-            "Update layer-level metadata on a USD layer. Only fields "
-            "present in the 'metadata' argument are touched; unmentioned "
-            "fields are left as-is. A field value of null clears the "
-            "field back to its unauthored state. Dict-valued fields "
-            "(customLayerData / expressionVariables) are fully replaced. "
-            "By default the file is saved in-place; pass 'output_path' "
-            "to export to a new file instead (source is not touched, and "
-            "the extension determines format — so this can also convert "
-            ".usda <-> .usdc). expressionVariables values are restricted "
-            "to str / bool / int / homogeneous list of those."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "metadata"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "metadata": {
-                    "type": "object",
-                    "description": (
-                        "Map of metadata field name to new value. Allowed "
-                        "fields: defaultPrim, startTimeCode, endTimeCode, "
-                        "framesPerSecond, timeCodesPerSecond, metersPerUnit, "
-                        "upAxis, customLayerData, expressionVariables. "
-                        "Value null clears the field."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_create_expressions_layer",
-        description=(
-            "Create a new USD layer at output_path containing ONLY the "
-            "given expressionVariables metadata (no prims, no other "
-            "layer metadata). Useful for pipeline config layers that "
-            "are sublayered or referenced by other USDs to inject "
-            "variables. expression_variables values are restricted to "
-            "str / bool / int / homogeneous list of those. output_path "
-            "must not already exist; file format is determined by the "
-            "extension (.usd / .usda / .usdc)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["output_path", "expression_variables"],
-            "properties": {
-                "output_path": {
-                    "type": "string",
-                    "description": "Absolute path to the new USD layer (must not exist)",
-                },
-                "expression_variables": {
-                    "type": "object",
-                    "description": "Non-empty dict of variable name to value",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_hierarchy",
-        description=(
-            "Read the prim hierarchy from a single USD layer without composition. "
-            "References, sublayers, and payloads are NOT resolved — "
-            "only prims defined directly in this file are returned. "
-            "Fastest option for a quick structural overview of one file."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum hierarchy depth to return (0 = unlimited, 1 = root prims only, etc.)",
-                    "default": 0,
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_hierarchy_composed",
-        description=(
-            "Read the fully composed USD prim hierarchy, resolving all "
-            "references and sublayers. Payloads are intentionally not loaded "
-            "to keep memory usage low. Use this when you need to see the "
-            "complete scene structure across multiple referenced files."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum hierarchy depth to return (0 = unlimited)",
-                    "default": 0,
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_composition_arcs",
-        description=(
-            "List the direct composition arcs declared in a single USD layer: "
-            "sublayers, references, and payloads. No composition is performed — "
-            "only arcs explicitly written in this file are returned. "
-            "Use this to understand which other USD files this layer depends on."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                }
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_replace_anchors",
-        description=(
-            "Replace multiple anchor asset paths (sublayers, references, payloads) "
-            "in a single USD layer file in one operation. "
-            "Edits the file in-place. "
-            "Use usd_read_composition_arcs first to inspect existing anchors."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "replacements"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file to modify",
-                },
-                "replacements": {
-                    "type": "object",
-                    "description": (
-                        "Map of {old_asset_path: new_asset_path}. "
-                        "Keys must match the exact strings stored in the USD file "
-                        "(as returned by usd_read_composition_arcs)."
-                    ),
-                    "additionalProperties": {"type": "string"},
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_add_sublayers",
-        description=(
-            "Add one or more sublayer asset paths to a USD layer's "
-            "subLayerPaths list. position='prepend' puts the new entries "
-            "at the top (strongest), so for input ['A','B','C'] the final "
-            "list is ['A','B','C', ...existing]. position='append' puts "
-            "them at the bottom (weakest), so final = [...existing, 'A','B','C']. "
-            "Entries whose string is already present are skipped (no-op) "
-            "and reported in 'skipped'; anonymous identifiers (starting "
-            "with 'anon:') are rejected. By default the file is saved in-place; "
-            "pass 'output_path' to export to a new file instead (source is not "
-            "touched, must not already exist; extension decides format)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "sublayers", "position"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "sublayers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "description": (
-                        "Non-empty list of sublayer asset path strings to add. "
-                        "Stored as-is — pass the exact string you want to "
-                        "appear in subLayerPaths."
-                    ),
-                },
-                "position": {
-                    "type": "string",
-                    "enum": ["prepend", "append"],
-                    "description": (
-                        "'prepend' = insert at the top of subLayerPaths "
-                        "(strongest); 'append' = insert at the bottom "
-                        "(weakest)."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_insert_sublayers",
-        description=(
-            "Insert one or more sublayer asset paths at an explicit position "
-            "in a USD layer's subLayerPaths. 'index' is 0-based against the "
-            "current list length: 0 = top (strongest, same as "
-            "usd_add_sublayers prepend), len(existing) = bottom (weakest, "
-            "same as append). Values outside [0, len] — including negatives "
-            "— raise. Multiple entries inserted at index i preserve input "
-            "order and land at i, i+1, i+2, ... Same dedup and anonymous-"
-            "identifier rejection as usd_add_sublayers. By default saves in-"
-            "place; pass 'output_path' to export to a new file instead."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "sublayers", "index"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "sublayers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "description": (
-                        "Non-empty list of sublayer asset path strings to "
-                        "insert (stored as-is)."
-                    ),
-                },
-                "index": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": (
-                        "0-based insertion index. Must be in "
-                        "[0, len(existing_subLayerPaths)] inclusive."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_remove_sublayers",
-        description=(
-            "Remove one or more sublayer asset paths from a USD layer's "
-            "subLayerPaths list. Matches the exact stored strings (same "
-            "strings returned by usd_read_composition_arcs). Entries not "
-            "found are silently skipped and reported in 'not_found' — no "
-            "error is raised, so partial removals always succeed. "
-            "By default the file is saved in-place; pass 'output_path' to "
-            "export to a new file instead (source is not touched)."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "sublayers"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to an existing USD file to edit",
-                },
-                "sublayers": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "description": (
-                        "Non-empty list of sublayer asset path strings to "
-                        "remove (exact string match)."
-                    ),
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": (
-                        "Optional. If given, export the modified layer to "
-                        "this path (must not already exist) instead of "
-                        "saving in-place. The source file is not touched."
-                    ),
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_stitch_clips",
-        description=(
-            "Stitch per-frame USD cache files into a single USD Value Clips stage. "
-            "Automatically generates topology.usd and manifest.usd alongside the output. "
-            "Supports frame looping, custom clip sets, and auto-detection of animated child prims."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["filepath_template", "primpath", "output_path", "frame_range"],
-            "properties": {
-                "filepath_template": {
-                    "type": "string",
-                    "description": "Per-frame path template. Supports {frame:04d} or $F4 format.",
-                },
-                "primpath": {
-                    "type": "string",
-                    "description": "Target prim path on the stage, e.g. /Geometry",
-                },
-                "output_path": {
-                    "type": "string",
-                    "description": "Absolute output path (.usd / .usda / .usdc)",
-                },
-                "frame_range": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "description": "Source file frame range [start, end] (inclusive)",
-                },
-                "scene_range": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "minItems": 2,
-                    "maxItems": 2,
-                    "description": "Scene timeline frame range [start, end]. Defaults to frame_range.",
-                },
-                "loop": {
-                    "type": "boolean",
-                    "description": "Loop file frames to fill scene_range. Default: false",
-                    "default": False,
-                },
-                "clip_set": {
-                    "type": "string",
-                    "description": 'USD Clip Set name. Default: "default"',
-                    "default": "default",
-                },
-                "clip_primpath": {
-                    "type": "string",
-                    "description": "Prim path inside clip files. Defaults to primpath.",
-                },
-                "strict": {
-                    "type": "boolean",
-                    "description": "Abort if any source file is missing. Default: false",
-                    "default": False,
-                },
-                "gen_topology": {
-                    "type": "boolean",
-                    "description": "Auto-generate topology.usd. Default: true",
-                    "default": True,
-                },
-                "gen_manifest": {
-                    "type": "boolean",
-                    "description": "Auto-generate manifest.usd. Default: true",
-                    "default": True,
-                },
-                "probe_frame": {
-                    "type": "integer",
-                    "description": "Frame used to generate topology/manifest. Defaults to first frame of frame_range.",
-                },
-                "auto_detect_prim": {
-                    "type": "boolean",
-                    "description": "Recursively detect animated child prims. Default: true",
-                    "default": True,
-                },
-                "fps": {
-                    "type": "number",
-                    "description": "Output stage FPS. Auto-detected from probe frame if omitted.",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_prim_attributes",
-        description=(
-            "List attributes on a USD prim with progressive disclosure. "
-            "Use detail='names' for a fast attribute name overview, "
-            "'types' (default) to add type info and array sizes, or "
-            "'samples' to also include time sample counts. "
-            "Use filter to narrow by name prefix (e.g. 'primvars:'), "
-            "and limit to cap the number of attributes returned."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "prim_path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "prim_path": {
-                    "type": "string",
-                    "description": "USD scene path of the prim to inspect (e.g. /Geo/mesh)",
-                },
-                "detail": {
-                    "type": "string",
-                    "enum": ["names", "types", "samples"],
-                    "default": "types",
-                    "description": (
-                        "'names' → attribute names only; "
-                        "'types' → add type_name, variability, is_array, array_size; "
-                        "'samples' → also add has_time_samples, time_sample_count"
-                    ),
-                },
-                "filter": {
-                    "type": "string",
-                    "description": "Return only attributes whose name starts with this prefix (e.g. 'primvars:')",
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 200,
-                    "description": "Maximum number of attributes to return (default 200)",
-                },
-                "frame": {
-                    "type": "number",
-                    "description": "Time code used to evaluate array_size. Omit for default time.",
-                },
-                "load_payloads": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Load USD payloads. Required if the target prim is defined inside a payload. Default: false.",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_attribute_value",
-        description=(
-            "Read the value of a single named attribute on a USD prim. "
-            "For array attributes, results are truncated to max_elements (default 100) "
-            "to avoid large payloads; check array_total and array_truncated in the response."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path", "prim_path", "attribute_name"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file",
-                },
-                "prim_path": {
-                    "type": "string",
-                    "description": "USD scene path of the prim (e.g. /Geo/mesh)",
-                },
-                "attribute_name": {
-                    "type": "string",
-                    "description": "Name of the attribute to read (e.g. 'points', 'xformOp:translate')",
-                },
-                "frame": {
-                    "type": "number",
-                    "description": "Time code at which to evaluate the attribute. Omit for default time.",
-                },
-                "max_elements": {
-                    "type": "integer",
-                    "default": 100,
-                    "description": "Maximum array elements to return (default 100)",
-                },
-                "load_payloads": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Load USD payloads. Required if the target prim is defined inside a payload. Default: false.",
-                },
-            },
-        },
-    ),
-    types.Tool(
-        name="usd_read_cameras",
-        description=(
-            "Find all Camera prims in a USD scene and read their lens and "
-            "projection attributes (focalLength, aperture, clippingRange, "
-            "fStop, focusDistance, projection, shutter). "
-            "The stage is fully composed — references and sublayers are "
-            "resolved — but payloads are not loaded. "
-            "Use this to inspect camera settings from any USD file."
-        ),
-        inputSchema={
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Absolute path to a USD file (.usd, .usda, .usdc, .usdz)",
-                },
-                "frame": {
-                    "type": "number",
-                    "description": (
-                        "Time code (frame number) at which to evaluate time-sampled "
-                        "attributes. Omit to use the default (static) value."
-                    ),
-                },
-            },
-        },
-    ),
-]
 
 # ---------------------------------------------------------------------------
-# Router
+# @mcp.tool() registrations
 # ---------------------------------------------------------------------------
 
-async def call_usd_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "usd_read_layer_metadata":
-        return await _handle_read_layer_metadata(arguments)
-    if name == "usd_write_layer_metadata":
-        return await _handle_write_layer_metadata(arguments)
-    if name == "usd_create_expressions_layer":
-        return await _handle_create_expressions_layer(arguments)
-    if name == "usd_read_hierarchy":
-        return await _handle_read_hierarchy(arguments)
-    if name == "usd_read_hierarchy_composed":
-        return await _handle_read_hierarchy_composed(arguments)
-    if name == "usd_read_composition_arcs":
-        return await _handle_read_composition_arcs(arguments)
-    if name == "usd_replace_anchors":
-        return await _handle_replace_anchors(arguments)
-    if name == "usd_add_sublayers":
-        return await _handle_add_sublayers(arguments)
-    if name == "usd_insert_sublayers":
-        return await _handle_insert_sublayers(arguments)
-    if name == "usd_remove_sublayers":
-        return await _handle_remove_sublayers(arguments)
-    if name == "usd_read_cameras":
-        return await _handle_read_cameras(arguments)
-    if name == "usd_stitch_clips":
-        return await _handle_stitch_clips(arguments)
-    if name == "usd_read_prim_attributes":
-        return await _handle_read_prim_attributes(arguments)
-    if name == "usd_read_attribute_value":
-        return await _handle_read_attribute_value(arguments)
-    raise MCPError(types.METHOD_NOT_FOUND, f"unknown usd tool: {name}")
 
-# ---------------------------------------------------------------------------
-# Handlers
-# ---------------------------------------------------------------------------
+def register(mcp: MCPServer) -> None:
+    mcp.tool()(usd_read_layer_metadata)
+    mcp.tool()(usd_read_hierarchy)
+    mcp.tool()(usd_read_hierarchy_composed)
+    mcp.tool()(usd_read_composition_arcs)
+    mcp.tool()(usd_read_cameras)
+    mcp.tool()(usd_read_prim_attributes)
+    mcp.tool()(usd_read_attribute_value)
+    mcp.tool()(usd_write_layer_metadata)
+    mcp.tool()(usd_create_expressions_layer)
+    mcp.tool()(usd_replace_anchors)
+    mcp.tool()(usd_add_sublayers)
+    mcp.tool()(usd_insert_sublayers)
+    mcp.tool()(usd_remove_sublayers)
+    mcp.tool()(usd_stitch_clips)
 
-async def _handle_read_layer_metadata(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
+
+def usd_read_layer_metadata(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+) -> dict:
+    """Read layer-level metadata from a single USD layer file (.usd, .usda, .usdc, .usdz) without composition. Returns the file format and all standard layer metadata fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, and expressionVariables. A field that has not been authored in the file is reported as null (distinguishing 'unauthored' from a legitimate authored zero / empty value)."""
     try:
-        result = read_layer_metadata(path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_layer_metadata(path)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_write_layer_metadata(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    metadata = arguments.get("metadata")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(metadata, dict):
-        raise MCPError(types.INVALID_PARAMS, "'metadata' must be an object")
+def usd_read_hierarchy(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    max_depth: Annotated[int, Field(description="Maximum hierarchy depth to return (0 = unlimited, 1 = root prims only, etc.)")] = 0,
+) -> dict:
+    """Read the prim hierarchy from a single USD layer without composition. References, sublayers, and payloads are NOT resolved — only prims defined directly in this file are returned. Fastest option for a quick structural overview of one file."""
     try:
-        result = write_layer_metadata(path, metadata, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_layer_hierarchy(path, max_depth=max_depth)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_create_expressions_layer(arguments: dict) -> list[types.TextContent]:
-    output_path = _require_str(arguments, "output_path")
-    expression_variables = arguments.get("expression_variables")
-    if not isinstance(expression_variables, dict):
-        raise MCPError(types.INVALID_PARAMS, "'expression_variables' must be an object")
+def usd_read_hierarchy_composed(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    max_depth: Annotated[int, Field(description="Maximum hierarchy depth to return (0 = unlimited)")] = 0,
+) -> dict:
+    """Read the fully composed USD prim hierarchy, resolving all references and sublayers. Payloads are intentionally not loaded to keep memory usage low. Use this when you need to see the complete scene structure across multiple referenced files."""
     try:
-        result = create_expressions_layer(output_path, expression_variables)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_composed_hierarchy(path, max_depth=max_depth)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_read_hierarchy(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    max_depth = to_int(arguments.get("max_depth", 0), "max_depth")
+def usd_read_composition_arcs(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+) -> dict:
+    """List the direct composition arcs declared in a single USD layer: sublayers, references, and payloads. No composition is performed — only arcs explicitly written in this file are returned. Use this to understand which other USD files this layer depends on."""
     try:
-        result = read_layer_hierarchy(path, max_depth=max_depth)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_composition_arcs(path)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_read_hierarchy_composed(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    max_depth = to_int(arguments.get("max_depth", 0), "max_depth")
+def usd_read_cameras(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file (.usd, .usda, .usdc, .usdz)")],
+    frame: Annotated[float | None, Field(description="Time code (frame number) at which to evaluate time-sampled attributes. Omit to use the default (static) value.")] = None,
+) -> dict:
+    """Find all Camera prims in a USD scene and read their lens and projection attributes (focalLength, aperture, clippingRange, fStop, focusDistance, projection, shutter). The stage is fully composed — references and sublayers are resolved — but payloads are not loaded. Use this to inspect camera settings from any USD file."""
     try:
-        result = read_composed_hierarchy(path, max_depth=max_depth)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_cameras(path, frame=frame)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_read_composition_arcs(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
+def usd_read_prim_attributes(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    prim_path: Annotated[str, Field(min_length=1, description="USD scene path of the prim to inspect (e.g. /Geo/mesh)")],
+    detail: Annotated[Literal["names", "types", "samples"], Field(description="'names' → attribute names only; 'types' → add type_name, variability, is_array, array_size; 'samples' → also add has_time_samples, time_sample_count")] = "types",
+    filter: Annotated[OptionalStr, Field(description="Return only attributes whose name starts with this prefix (e.g. 'primvars:')")] = None,
+    limit: Annotated[int, Field(description="Maximum number of attributes to return (default 200)")] = 200,
+    frame: Annotated[float | None, Field(description="Time code used to evaluate array_size. Omit for default time.")] = None,
+    load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the target prim is defined inside a payload. Default: false.")] = False,
+) -> dict:
+    """List attributes on a USD prim with progressive disclosure. Use detail='names' for a fast attribute name overview, 'types' (default) to add type info and array sizes, or 'samples' to also include time sample counts. Use filter to narrow by name prefix (e.g. 'primvars:'), and limit to cap the number of attributes returned."""
     try:
-        result = read_composition_arcs(path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return read_prim_attributes(path, prim_path, detail=detail, filter_prefix=filter, limit=limit, frame=frame, load_payloads=load_payloads)
+    except (FileNotFoundError, UsdOpenError, ValueError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_attribute_value(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    prim_path: Annotated[str, Field(min_length=1, description="USD scene path of the prim (e.g. /Geo/mesh)")],
+    attribute_name: Annotated[str, Field(min_length=1, description="Name of the attribute to read (e.g. 'points', 'xformOp:translate')")],
+    frame: Annotated[float | None, Field(description="Time code at which to evaluate the attribute. Omit for default time.")] = None,
+    max_elements: Annotated[int, Field(description="Maximum array elements to return (default 100)")] = 100,
+    load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the target prim is defined inside a payload. Default: false.")] = False,
+) -> dict:
+    """Read the value of a single named attribute on a USD prim. For array attributes, results are truncated to max_elements (default 100) to avoid large payloads; check array_total and array_truncated in the response."""
+    try:
+        return read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_replace_anchors(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    replacements = arguments.get("replacements")
-    if replacements is None:
-        replacements = {}
-    elif not isinstance(replacements, dict):
-        raise MCPError(types.INVALID_PARAMS, "replacements must be an object")
+def usd_write_layer_metadata(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    metadata: Annotated[dict, Field(description="Map of metadata field name to new value. Allowed fields: defaultPrim, startTimeCode, endTimeCode, framesPerSecond, timeCodesPerSecond, metersPerUnit, upAxis, customLayerData, expressionVariables. Value null clears the field.")],
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Update layer-level metadata on a USD layer. Only fields present in the 'metadata' argument are touched; unmentioned fields are left as-is. A field value of null clears the field back to its unauthored state. Dict-valued fields (customLayerData / expressionVariables) are fully replaced. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, and the extension determines format — so this can also convert .usda <-> .usdc). expressionVariables values are restricted to str / bool / int / homogeneous list of those."""
     try:
-        result = replace_anchors(path, replacements)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return write_layer_metadata(path, metadata, output_path=output_path)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_add_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    sublayers = arguments.get("sublayers")
-    position = _require_str(arguments, "position")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(sublayers, list):
-        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
+def usd_create_expressions_layer(
+    output_path: Annotated[str, Field(min_length=1, description="Absolute path to the new USD layer (must not exist)")],
+    expression_variables: Annotated[dict, Field(description="Non-empty dict of variable name to value")],
+) -> dict:
+    """Create a new USD layer at output_path containing ONLY the given expressionVariables metadata (no prims, no other layer metadata). Useful for pipeline config layers that are sublayered or referenced by other USDs to inject variables. expression_variables values are restricted to str / bool / int / homogeneous list of those. output_path must not already exist; file format is determined by the extension (.usd / .usda / .usdc)."""
     try:
-        result = add_sublayers(path, sublayers, position, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return create_expressions_layer(output_path, expression_variables)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_insert_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    sublayers = arguments.get("sublayers")
-    index = arguments.get("index")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(sublayers, list):
-        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
-    if not isinstance(index, int) or isinstance(index, bool):
-        raise MCPError(types.INVALID_PARAMS, "'index' must be an integer")
+def usd_replace_anchors(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file to modify")],
+    replacements: Annotated[dict[str, str], Field(description="Map of {old_asset_path: new_asset_path}. Keys must match the exact strings stored in the USD file (as returned by usd_read_composition_arcs).")],
+) -> dict:
+    """Replace multiple anchor asset paths (sublayers, references, payloads) in a single USD layer file in one operation. Edits the file in-place. Use usd_read_composition_arcs first to inspect existing anchors."""
     try:
-        result = insert_sublayers(path, sublayers, index, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return replace_anchors(path, replacements)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_remove_sublayers(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    sublayers = arguments.get("sublayers")
-    output_path = _optional_str(arguments, "output_path")
-    if not isinstance(sublayers, list):
-        raise MCPError(types.INVALID_PARAMS, "'sublayers' must be an array")
+def usd_add_sublayers(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to add. Stored as-is — pass the exact string you want to appear in subLayerPaths.")],
+    position: Annotated[Literal["prepend", "append"], Field(description="'prepend' = insert at the top of subLayerPaths (strongest); 'append' = insert at the bottom (weakest).")],
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Add one or more sublayer asset paths to a USD layer's subLayerPaths list. position='prepend' puts the new entries at the top (strongest), so for input ['A','B','C'] the final list is ['A','B','C', ...existing]. position='append' puts them at the bottom (weakest), so final = [...existing, 'A','B','C']. Entries whose string is already present are skipped (no-op) and reported in 'skipped'; anonymous identifiers (starting with 'anon:') are rejected. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched, must not already exist; extension decides format)."""
     try:
-        result = remove_sublayers(path, sublayers, output_path=output_path)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return add_sublayers(path, sublayers, position, output_path=output_path)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
-async def _handle_read_cameras(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    frame_raw = arguments.get("frame")
-    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
+def usd_insert_sublayers(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to insert (stored as-is).")],
+    index: Annotated[int, Field(ge=0, strict=True, description="0-based insertion index. Must be in [0, len(existing_subLayerPaths)] inclusive.")],
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Insert one or more sublayer asset paths at an explicit position in a USD layer's subLayerPaths. 'index' is 0-based against the current list length: 0 = top (strongest, same as usd_add_sublayers prepend), len(existing) = bottom (weakest, same as append). Values outside [0, len] — including negatives — raise. Multiple entries inserted at index i preserve input order and land at i, i+1, i+2, ... Same dedup and anonymous-identifier rejection as usd_add_sublayers. By default saves in-place; pass 'output_path' to export to a new file instead."""
     try:
-        result = read_cameras(path, frame=frame)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+        return insert_sublayers(path, sublayers, index, output_path=output_path)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
-async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
-    import os
-    filepath_template = _require_str(arguments, "filepath_template")
-    primpath          = _require_str(arguments, "primpath")
-    output_path       = _require_str(arguments, "output_path")
-    frame_range_raw   = arguments.get("frame_range")
 
-    if not isinstance(frame_range_raw, list) or len(frame_range_raw) != 2:
-        raise MCPError(types.INVALID_PARAMS, "frame_range must be a [start, end] integer array")
-    frame_range = (to_int(frame_range_raw[0], "frame_range"), to_int(frame_range_raw[1], "frame_range"))
-
-    scene_range_raw  = arguments.get("scene_range")
-    scene_range      = (to_int(scene_range_raw[0], "scene_range"), to_int(scene_range_raw[1], "scene_range")) if scene_range_raw else None
-    loop             = bool(arguments.get("loop", False))
-    clip_set         = str(arguments.get("clip_set", "default"))
-    clip_primpath    = _optional_str(arguments, "clip_primpath")
-    strict           = bool(arguments.get("strict", False))
-    gen_topology     = bool(arguments.get("gen_topology", True))
-    gen_manifest     = bool(arguments.get("gen_manifest", True))
-    probe_frame_raw  = arguments.get("probe_frame")
-    probe_frame      = to_int(probe_frame_raw, "probe_frame") if probe_frame_raw is not None else None
-    auto_detect_prim = bool(arguments.get("auto_detect_prim", True))
-    fps_raw          = arguments.get("fps")
-    fps              = to_float(fps_raw, "fps") if fps_raw is not None else None
-
+def usd_remove_sublayers(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to an existing USD file to edit")],
+    sublayers: Annotated[list[str], Field(min_length=1, description="Non-empty list of sublayer asset path strings to remove (exact string match).")],
+    output_path: Annotated[OptionalStr, Field(description="Optional. If given, export the modified layer to this path (must not already exist) instead of saving in-place. The source file is not touched.")] = None,
+) -> dict:
+    """Remove one or more sublayer asset paths from a USD layer's subLayerPaths list. Matches the exact stored strings (same strings returned by usd_read_composition_arcs). Entries not found are silently skipped and reported in 'not_found' — no error is raised, so partial removals always succeed. By default the file is saved in-place; pass 'output_path' to export to a new file instead (source is not touched)."""
     try:
-        result = stitch_clips(
+        return remove_sublayers(path, sublayers, output_path=output_path)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_stitch_clips(
+    filepath_template: Annotated[str, Field(min_length=1, description="Per-frame path template. Supports {frame:04d} or $F4 format.")],
+    primpath: Annotated[str, Field(min_length=1, description="Target prim path on the stage, e.g. /Geometry")],
+    output_path: Annotated[str, Field(min_length=1, description="Absolute output path (.usd / .usda / .usdc)")],
+    frame_range: Annotated[tuple[int, int], Field(description="Source file frame range [start, end] (inclusive)")],
+    scene_range: Annotated[tuple[int, int] | None, Field(description="Scene timeline frame range [start, end]. Defaults to frame_range.")] = None,
+    loop: Annotated[bool, Field(description="Loop file frames to fill scene_range. Default: false")] = False,
+    clip_set: Annotated[str, Field(description='USD Clip Set name. Default: "default"')] = "default",
+    clip_primpath: Annotated[OptionalStr, Field(description="Prim path inside clip files. Defaults to primpath.")] = None,
+    strict: Annotated[bool, Field(description="Abort if any source file is missing. Default: false")] = False,
+    gen_topology: Annotated[bool, Field(description="Auto-generate topology.usd. Default: true")] = True,
+    gen_manifest: Annotated[bool, Field(description="Auto-generate manifest.usd. Default: true")] = True,
+    probe_frame: Annotated[int | None, Field(description="Frame used to generate topology/manifest. Defaults to first frame of frame_range.")] = None,
+    auto_detect_prim: Annotated[bool, Field(description="Recursively detect animated child prims. Default: true")] = True,
+    fps: Annotated[float | None, Field(description="Output stage FPS. Auto-detected from probe frame if omitted.")] = None,
+) -> dict:
+    """Stitch per-frame USD cache files into a single USD Value Clips stage. Automatically generates topology.usd and manifest.usd alongside the output. Supports frame looping, custom clip sets, and auto-detection of animated child prims."""
+    try:
+        return stitch_clips(
             filepath_template=filepath_template,
             primpath=primpath,
             output_path=output_path,
@@ -776,39 +244,7 @@ async def _handle_stitch_clips(arguments: dict) -> list[types.TextContent]:
             auto_detect_prim=auto_detect_prim,
             fps=fps,
         )
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
     except (FileNotFoundError, StitchClipsError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_prim_attributes(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    prim_path = _require_str(arguments, "prim_path")
-    detail = str(arguments.get("detail", "types"))
-    filter_prefix = _optional_str(arguments, "filter")
-    limit = to_int(arguments.get("limit", 200), "limit")
-    frame_raw = arguments.get("frame")
-    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
-    load_payloads = bool(arguments.get("load_payloads", False))
-    try:
-        result = read_prim_attributes(path, prim_path, detail=detail, filter_prefix=filter_prefix, limit=limit, frame=frame, load_payloads=load_payloads)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError, ValueError) as e:
-        raise _usd_error(e) from e
-
-
-async def _handle_read_attribute_value(arguments: dict) -> list[types.TextContent]:
-    path = _require_str(arguments, "path")
-    prim_path = _require_str(arguments, "prim_path")
-    attribute_name = _require_str(arguments, "attribute_name")
-    frame_raw = arguments.get("frame")
-    frame = to_float(frame_raw, "frame") if frame_raw is not None else None
-    max_elements = to_int(arguments.get("max_elements", 100), "max_elements")
-    load_payloads = bool(arguments.get("load_payloads", False))
-    try:
-        result = read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
-        return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
-    except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 
@@ -819,19 +255,3 @@ async def _handle_read_attribute_value(arguments: dict) -> list[types.TextConten
 def _usd_error(e: Exception) -> MCPError:
     code = types.INVALID_PARAMS if isinstance(e, FileNotFoundError) else types.INVALID_REQUEST
     return MCPError(code, str(e))
-
-
-def _require_str(arguments: dict, key: str) -> str:
-    v = arguments.get(key)
-    if not isinstance(v, str) or not v:
-        raise MCPError(types.INVALID_PARAMS, f"'{key}' is required and must be a non-empty string")
-    return v
-
-
-def _optional_str(arguments: dict, key: str) -> str | None:
-    v = arguments.get(key)
-    if v is None or v == "":
-        return None
-    if not isinstance(v, str):
-        raise MCPError(types.INVALID_PARAMS, f"'{key}' must be a string if provided")
-    return v
