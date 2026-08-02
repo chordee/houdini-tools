@@ -37,6 +37,14 @@ git clone https://github.com/chordee/houdini-tools.git
 
 The MCP server pulls its own Python dependencies on first run via `uv` — no manual `uv sync` required.
 
+## Testing
+
+```bash
+cd mcp-server-houdini-lite
+uv sync --group dev
+uv run pytest
+```
+
 ### Antigravity (CLI & IDE)
 
 Add the repo's parent directory as a marketplace in `~/.gemini/config/config.json` (or `~/.gemini/settings.json`), then enable the plugin:

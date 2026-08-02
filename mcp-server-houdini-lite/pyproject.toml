@@ -15,6 +15,14 @@ houdini-lite = "server:main"
 [tool.hatch.build.targets.wheel]
 include = ["server.py", "bgeo_handlers.py", "bgeo_reader.py", "bgeo_clips.py", "blosc_io.py", "usd_handlers.py", "usd_tools.py", "usd_clips.py", "vdb_handlers.py", "vdb_tools.py", "vdb_clips.py"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
