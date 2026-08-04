@@ -744,6 +744,8 @@ Stitches per-frame USD cache files into a single USD Value Clips stage. Automati
 | `auto_detect_prim` | boolean | no | Recursively detect animated child prims (default: `true`) |
 | `fps` | number | no | Output stage FPS, must be finite and positive (default: auto-detected from the probe frame's `timeCodesPerSecond`) |
 
+The probe frame must contain both `primpath` and `clip_primpath` (when specified). Missing prims are rejected before any output, topology, or manifest file is written.
+
 `fps` is written to the output stage as `timeCodesPerSecond` and `framesPerSecond`. USD stores whatever it is given without validating it, so a zero, negative or non-finite value would produce a stage declaring a nonsense frame rate while the call reported success — clip playback timing would be wrong in any consumer, even though the geometry itself still resolves. Such values are rejected instead, whether passed explicitly or auto-detected from a probe frame whose own `timeCodesPerSecond` is invalid.
 
 **Output** (JSON)
