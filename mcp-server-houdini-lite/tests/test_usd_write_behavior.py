@@ -46,6 +46,9 @@ async def test_write_layer_metadata_exports_without_modifying_source(tmp_path):
     assert output_path.exists()
     assert source.HasFramesPerSecond() is False
     assert source.customLayerData == {}
+    source.Reload()
+    assert source.HasFramesPerSecond() is False
+    assert source.customLayerData == {}
     assert output.framesPerSecond == 30.0
     assert dict(output.customLayerData) == {"owner": "test"}
 
@@ -120,6 +123,8 @@ async def test_add_sublayers_prepends_in_input_order_to_export(tmp_path):
     )
 
     output = Sdf.Layer.FindOrOpen(str(output_path))
+    assert list(source.subLayerPaths) == ["existing.usda"]
+    source.Reload()
     assert list(source.subLayerPaths) == ["existing.usda"]
     assert list(output.subLayerPaths) == ["a.usda", "b.usda", "existing.usda"]
     assert payload["final_sublayers"] == ["a.usda", "b.usda", "existing.usda"]
