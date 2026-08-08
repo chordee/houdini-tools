@@ -2,6 +2,8 @@
 
 A lightweight [MCP](https://modelcontextprotocol.io/) server for Houdini pipeline tools. **No Houdini installation required** — reads `.bgeo.sc` files directly via Blosc decompression and BJSON parsing. Inspects `.bgeo.sc` geometry caches (attributes, geometry type, metadata) and USD scene files without loading full geometry into memory.
 
+**Why it reads far more than it writes.** This server was built to support an AI agent *writing* Houdini tools, not to drive Houdini itself. The agent needs to check what the tool it is building actually produced, and it needs that answer in milliseconds without a Houdini session in the loop — so verification is the common operation and most of the surface is read-only. Writing is confined to layer-level composition (sublayers, layer metadata, expression variables) and stitching per-frame caches into Value Clips stages.
+
 ---
 
 ## Testing
