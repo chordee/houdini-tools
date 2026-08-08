@@ -94,6 +94,7 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
     frame_map: dict[int, str] = {}
     bgeo_count = 0
     matched_count = 0
+    unreadable_count = 0
     for fname in sorted(os.listdir(directory)):
         if not fname.lower().endswith(".bgeo.sc"):
             continue
@@ -106,6 +107,7 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
             meta = _read_meta(fpath)
         except Exception as e:
             print(f"[WARNING] skipped unreadable file: {fname}: {e}")
+            unreadable_count += 1
             continue
 
         sample_frame = meta["sample_frame"]
@@ -119,7 +121,7 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
         frame_map[sample_frame] = fpath
 
     if not frame_map:
-        # Three different causes, three different fixes — say which one it is.
+        # Each cause needs a different fix, so each one says which it is.
         if bgeo_count == 0:
             raise BgeoClipsError(f"no .bgeo.sc files in: {directory}")
         if matched_count == 0:
@@ -127,9 +129,15 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
                 f"{bgeo_count} .bgeo.sc file(s) in {directory}, but none match the "
                 f"template: {os.path.basename(filepath_template)}"
             )
+        if unreadable_count == matched_count:
+            raise BgeoClipsError(
+                f"all {matched_count} file(s) matching the template in {directory} "
+                f"are unreadable; see the warnings above for the parse errors"
+            )
         raise BgeoClipsError(
-            f"{matched_count} file(s) match the template in {directory}, but none "
-            f"declare usdconfigsampleframe; pass frame_range explicitly"
+            f"{matched_count - unreadable_count} readable file(s) match the template "
+            f"in {directory}, but none declare usdconfigsampleframe; "
+            f"pass frame_range explicitly"
         )
     return frame_map
 

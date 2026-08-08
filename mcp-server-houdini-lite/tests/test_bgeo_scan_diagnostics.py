@@ -1,10 +1,12 @@
-"""An empty scan result has three causes and they need different messages.
+"""An empty scan has four causes and each one points somewhere different.
 
-_scan_directory returns {} when the directory holds no .bgeo.sc at all, when it
-holds some but none match the filename template, and when matching files carry
-no usdconfigsampleframe. The caller reported all three as "no readable .bgeo.sc
-with usdconfigsampleframe found", which sends a user whose template simply does
-not match their filenames off to inspect detail attributes instead.
+_scan_directory raises a cause-specific BgeoClipsError when it collects nothing:
+the directory holds no .bgeo.sc at all, it holds some but none match the
+filename template, every matching file failed to parse, or matching files
+parsed but declare no usdconfigsampleframe. It used to return {} for all of
+these and let the caller report "no readable .bgeo.sc with usdconfigsampleframe
+found", which sent a user whose template simply did not match their filenames
+off to inspect detail attributes that were never the problem.
 
 The fixture directory holds three real Houdini sequences that make these cases
 distinguishable with actual files rather than mocks:
@@ -69,3 +71,16 @@ def test_still_blames_the_sample_frame_when_matching_files_lack_it():
         bgeo_clips._scan_directory(str(BGEO_SEQ_DIR / "plain.$F.bgeo.sc"))
 
     assert "usdconfigsampleframe" in str(exc.value)
+
+
+def test_reports_unreadable_caches_rather_than_missing_sample_frames(tmp_path):
+    """Files that match but cannot be parsed are corrupt, not unconfigured."""
+    for name in ("cache.0001.bgeo.sc", "cache.0002.bgeo.sc"):
+        (tmp_path / name).write_bytes(b"not a bgeo at all")
+
+    with pytest.raises(BgeoClipsError) as exc:
+        bgeo_clips._scan_directory(str(tmp_path / "cache.{frame:04d}.bgeo.sc"))
+
+    message = str(exc.value)
+    assert "unreadable" in message
+    assert "usdconfigsampleframe" not in message

@@ -65,7 +65,9 @@ async def test_export_refuses_to_overwrite_an_existing_output(tool_name, extra, 
 @pytest.mark.anyio
 async def test_create_expressions_layer_refuses_an_existing_output(tmp_path):
     output_path = tmp_path / "taken.usda"
-    _layer_with(output_path)
+    existing = _layer_with(output_path)
+    existing.customLayerData = {"keep": "me"}
+    existing.Save()
 
     _, text = await _call_expecting_failure(
         "usd_create_expressions_layer",
@@ -73,6 +75,11 @@ async def test_create_expressions_layer_refuses_an_existing_output(tmp_path):
     )
 
     assert "already exists" in text
+    # Refusing is only half of it: the file that was already there must survive.
+    survivor = Sdf.Layer.FindOrOpen(str(output_path))
+    survivor.Reload()
+    assert dict(survivor.customLayerData) == {"keep": "me"}
+    assert dict(survivor.expressionVariables) == {}
 
 
 @pytest.mark.anyio
