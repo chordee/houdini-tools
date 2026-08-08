@@ -1,0 +1,8 @@
+# Houdini and USD caches used as test fixtures. core.autocrlf is commonly on
+# for Windows clones of this repo; without these rules the only thing keeping
+# a .bgeo.sc from being line-ending mangled is git's content heuristic.
+*.bgeo.sc binary
+*.bgeo    binary
+*.vdb     binary
+*.usdc    binary
+*.usdz    binary
