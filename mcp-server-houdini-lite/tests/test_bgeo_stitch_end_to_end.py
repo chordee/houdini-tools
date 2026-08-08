@@ -11,14 +11,11 @@ sample frame would look for offset_sparse.1001.bgeo.sc and find nothing, so the
 asset paths below only come out right if the scanned mapping is what is used.
 """
 
-import json
-
 import pytest
+from conftest import BGEO_SEQ_DIR
 from pxr import Sdf, Usd
 
 from bgeo_clips import BgeoClipsError, stitch_bgeo_clips
-
-from conftest import BGEO_SEQ_DIR
 
 EXPECTED_SAMPLE_FRAMES = [1001, 1003, 1005, 1007, 1009, 1011,
                           1013, 1015, 1017, 1019, 1021, 1023]

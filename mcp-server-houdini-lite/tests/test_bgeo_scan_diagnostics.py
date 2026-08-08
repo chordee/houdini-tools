@@ -14,11 +14,10 @@ distinguishable with actual files rather than mocks:
 """
 
 import pytest
+from conftest import BGEO_SEQ_DIR
 
 import bgeo_clips
 from bgeo_clips import BgeoClipsError
-
-from conftest import BGEO_SEQ_DIR
 
 
 def test_scan_collects_only_the_requested_sequence(tmp_path):
