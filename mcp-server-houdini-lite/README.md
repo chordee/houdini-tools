@@ -781,6 +781,8 @@ Automatically reads `usdconfigpathprefix` and `usdconfigsampleframe` detail attr
 
 When `frame_range` is omitted, only filenames matching `filepath_template` are scanned. The scanned file paths are preserved even when `usdconfigsampleframe` differs from the frame number in the filename. If two matching files declare the same `usdconfigsampleframe`, the operation is rejected instead of choosing one silently.
 
+A scan that finds nothing reports which of the three causes applies — the directory holds no `.bgeo.sc` at all, it holds some but none match `filepath_template` (which the message quotes), or matching files carry no `usdconfigsampleframe`. Only the last of these is a reason to inspect the caches; the middle one means the template and the filenames disagree.
+
 **Mesh prim path resolution**
 
 | Probe bgeo has `path` primitive attribute? | Resulting Mesh prim(s) |
