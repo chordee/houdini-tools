@@ -82,7 +82,10 @@ def test_loop_does_not_densify_an_auto_detected_sparse_timeline(tmp_path):
     )
 
     assert result["frame_count"] == 12
-    assert _clip_asset_paths(output_path) == _clip_asset_paths(output_path)
+    # Each scanned file appears once and in order: looping would repeat them.
+    assert [p.split("/")[-1] for p in _clip_asset_paths(output_path)] == [
+        f"offset_sparse.{n:04d}.bgeo.sc" for n in range(1, 13)
+    ]
     stage = Usd.Stage.Open(str(output_path))
     clips = stage.GetPrimAtPath("/ROOT").GetMetadata("clips")
     assert [t[0] for t in clips["default"]["times"]] == EXPECTED_SAMPLE_FRAMES
