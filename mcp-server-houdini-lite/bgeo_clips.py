@@ -92,14 +92,22 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
 
     filename_pattern = _template_filename_pattern(filepath_template)
     frame_map: dict[int, str] = {}
+    bgeo_count = 0
+    matched_count = 0
+    unreadable_count = 0
     for fname in sorted(os.listdir(directory)):
+        if not fname.lower().endswith(".bgeo.sc"):
+            continue
+        bgeo_count += 1
         if not filename_pattern.match(fname):
             continue
+        matched_count += 1
         fpath = os.path.join(directory, fname)
         try:
             meta = _read_meta(fpath)
         except Exception as e:
             print(f"[WARNING] skipped unreadable file: {fname}: {e}")
+            unreadable_count += 1
             continue
 
         sample_frame = meta["sample_frame"]
@@ -111,6 +119,26 @@ def _scan_directory(filepath_template: str) -> dict[int, str]:
                 f"{frame_map[sample_frame]} and {fpath}"
             )
         frame_map[sample_frame] = fpath
+
+    if not frame_map:
+        # Each cause needs a different fix, so each one says which it is.
+        if bgeo_count == 0:
+            raise BgeoClipsError(f"no .bgeo.sc files in: {directory}")
+        if matched_count == 0:
+            raise BgeoClipsError(
+                f"{bgeo_count} .bgeo.sc file(s) in {directory}, but none match the "
+                f"template: {os.path.basename(filepath_template)}"
+            )
+        if unreadable_count == matched_count:
+            raise BgeoClipsError(
+                f"all {matched_count} file(s) matching the template in {directory} "
+                f"are unreadable; see the warnings above for the parse errors"
+            )
+        raise BgeoClipsError(
+            f"{matched_count - unreadable_count} readable file(s) match the template "
+            f"in {directory}, but none declare usdconfigsampleframe; "
+            f"pass frame_range explicitly"
+        )
     return frame_map
 
 
@@ -376,12 +404,9 @@ def stitch_bgeo_clips(
     # --- 1. Build frame map {scene_frame: bgeo_path} ---
     auto_detected_frame_range = frame_range is None
     if auto_detected_frame_range:
+        # _scan_directory raises with a cause-specific message when it finds
+        # nothing, so frame_map is non-empty here.
         frame_map = _scan_directory(filepath_template)
-        if not frame_map:
-            raise BgeoClipsError(
-                f"no readable .bgeo.sc with usdconfigsampleframe found in: "
-                f"{os.path.dirname(os.path.abspath(filepath_template))}"
-            )
         sorted_frames = sorted(frame_map.keys())
         frame_range = (sorted_frames[0], sorted_frames[-1])
         filepaths = [frame_map[f] for f in sorted_frames]
@@ -498,15 +523,14 @@ def stitch_bgeo_clips(
     paired = list(zip(scene_frames, file_frames))
     scene_frames = [p[0] for p in paired]
     file_frames  = [p[1] for p in paired]
-    # rebuild filepaths to match (possibly looped) file_frames
-    # for auto-detected frame_map, rebuild; otherwise use template
-    try:
-        if auto_detected_frame_range:
-            filepaths = [frame_map[f] for f in file_frames]
-        else:
-            filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]
-    except KeyError as e:
-        raise BgeoClipsError(f"frame {e} not found in scan result during loop expansion") from e
+    # Rebuild filepaths to match the (possibly looped) file_frames. When the
+    # range was auto-detected, the scanned paths are authoritative: a sample
+    # frame need not equal the frame number in the filename, so re-resolving
+    # the template here would point at the wrong file, or at none at all.
+    if auto_detected_frame_range:
+        filepaths = [frame_map[f] for f in file_frames]
+    else:
+        filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]
 
     print(f"[INFO] Scene frames: {scene_frames[0]}–{scene_frames[-1]}  ({len(scene_frames)} frames)")
 

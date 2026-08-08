@@ -2,6 +2,8 @@
 
 A lightweight [MCP](https://modelcontextprotocol.io/) server for Houdini pipeline tools. **No Houdini installation required** — reads `.bgeo.sc` files directly via Blosc decompression and BJSON parsing. Inspects `.bgeo.sc` geometry caches (attributes, geometry type, metadata) and USD scene files without loading full geometry into memory.
 
+**Why it reads far more than it writes.** This server was built to support an AI agent *writing* Houdini tools, not to drive Houdini itself. The agent needs to check what the tool it is building actually produced, and it needs that answer in milliseconds without a Houdini session in the loop — so verification is the common operation and most of the surface is read-only. Writing is confined to layer-level composition (sublayers, layer metadata, expression variables) and stitching per-frame caches into Value Clips stages.
+
 ---
 
 ## Testing
@@ -780,6 +782,8 @@ Stitches per-frame `.bgeo.sc` cache files into a USD Value Clips stage. The clip
 Automatically reads `usdconfigpathprefix` and `usdconfigsampleframe` detail attributes embedded in the `.bgeo.sc` files to configure the primpath and frame mapping without requiring the user to specify them.
 
 When `frame_range` is omitted, only filenames matching `filepath_template` are scanned. The scanned file paths are preserved even when `usdconfigsampleframe` differs from the frame number in the filename. If two matching files declare the same `usdconfigsampleframe`, the operation is rejected instead of choosing one silently.
+
+A scan that finds nothing reports which of the four causes applies — the directory holds no `.bgeo.sc` at all; it holds some but none match `filepath_template`, which the message quotes; every matching file failed to parse, with the per-file reason in the warnings above the error; or matching files parsed but carry no `usdconfigsampleframe`. The template case means the template and the filenames disagree; only the last two are a reason to look at the caches themselves.
 
 **Mesh prim path resolution**
 

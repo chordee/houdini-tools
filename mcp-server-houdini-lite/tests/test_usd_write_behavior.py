@@ -5,7 +5,6 @@ from mcp.client.client import Client
 from pxr import Sdf, Usd
 
 import server
-from usd_tools import read_composition_arcs
 
 
 async def _call_tool(name, arguments):
@@ -99,11 +98,16 @@ async def test_replace_anchors_updates_sublayer_reference_and_payload(tmp_path):
         {"path": str(source_path), "replacements": replacements},
     )
 
-    arcs = read_composition_arcs(str(source_path))
+    # Read the layer back through Sdf rather than this package's own reader:
+    # a shared path-handling bug would otherwise let writer and reader agree
+    # with each other while both being wrong.
+    layer = Sdf.Layer.FindOrOpen(str(source_path))
+    layer.Reload()
+    prim = layer.GetPrimAtPath("/Root")
     assert payload["total_replaced"] == 3
-    assert arcs["sublayers"] == ["new-sub.usda"]
-    assert [item["asset_path"] for item in arcs["references"]] == ["new-ref.usda"]
-    assert [item["asset_path"] for item in arcs["payloads"]] == ["new-payload.usda"]
+    assert list(layer.subLayerPaths) == ["new-sub.usda"]
+    assert [r.assetPath for r in prim.referenceList.prependedItems] == ["new-ref.usda"]
+    assert [p.assetPath for p in prim.payloadList.prependedItems] == ["new-payload.usda"]
 
 
 @pytest.mark.anyio
@@ -166,3 +170,44 @@ async def test_remove_sublayers_removes_match_and_reports_missing(tmp_path):
     assert list(layer.subLayerPaths) == ["a.usda", "c.usda"]
     assert payload["removed"] == ["b.usda"]
     assert payload["not_found"] == ["missing.usda"]
+
+
+@pytest.mark.anyio
+async def test_write_layer_metadata_saves_in_place_when_no_output_is_given(tmp_path):
+    """in-place is the default mode; the export tests never exercise it."""
+    source_path = tmp_path / "source.usda"
+    source = _create_layer(source_path)
+
+    payload = await _call_tool(
+        "usd_write_layer_metadata",
+        {
+            "path": str(source_path),
+            "metadata": {"framesPerSecond": 48.0, "upAxis": "Z"},
+        },
+    )
+
+    assert payload["mode"] == "in_place"
+    assert list(tmp_path.iterdir()) == [source_path], "in-place must not add files"
+    source.Reload()
+    assert source.framesPerSecond == 48.0
+    assert source.pseudoRoot.GetInfo("upAxis") == "Z"
+
+
+@pytest.mark.anyio
+async def test_add_sublayers_appends_after_existing_entries(tmp_path):
+    """The prepend case is covered above; append is the other half of the enum."""
+    source_path = tmp_path / "source.usda"
+    layer = _create_layer(source_path, ["existing.usda"])
+
+    payload = await _call_tool(
+        "usd_add_sublayers",
+        {
+            "path": str(source_path),
+            "sublayers": ["a.usda", "b.usda"],
+            "position": "append",
+        },
+    )
+
+    layer.Reload()
+    assert list(layer.subLayerPaths) == ["existing.usda", "a.usda", "b.usda"]
+    assert payload["final_sublayers"] == ["existing.usda", "a.usda", "b.usda"]
