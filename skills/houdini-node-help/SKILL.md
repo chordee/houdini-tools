@@ -21,8 +21,9 @@ python -c "import zipfile;print(zipfile.ZipFile(r'$H/houdini/help/help.zip').rea
 # Full wiki markup reference (1469 lines)
 python -c "import zipfile;print(zipfile.ZipFile(r'$H/houdini/help/help.zip').read('format.txt').decode('utf-8','replace'))"
 
-# A real example of the node type you are documenting
-python -c "import zipfile;print(zipfile.ZipFile(r'$H/houdini/help/nodes.zip').read('sop/scatter.txt').decode('utf-8','replace'))"
+# A real example from the SAME context as your node: sop/, lop/, dop/, cop/, ...
+EXAMPLE="sop/scatter.txt"
+python -c "import zipfile;print(zipfile.ZipFile(r'$H/houdini/help/nodes.zip').read('$EXAMPLE').decode('utf-8','replace'))"
 ```
 
 Without a local install, the same two documents are online, and so is every node example:
@@ -40,7 +41,7 @@ Pick the example from the same context as your node — a SOP for a SOP, a LOP f
 Two options, per Houdini's own `nodes.txt`:
 
 - **The Help tab of the asset's Type Properties.** Usually the best choice for a digital asset — it travels with the asset.
-- **A file under `HOUDINIPATH/help/nodes/<dir>/`**, where `<dir>` is the short category name: `obj`, `sop`, `dop`, `cop`, `out`, `lop`, `top`, `chop`, `vop`, `apex`.
+- **A file under `help/nodes/<dir>/` inside any directory on `HOUDINI_PATH`**, where `<dir>` is the short category name: `obj`, `sop`, `dop`, `cop`, `out`, `lop`, `top`, `chop`, `vop`, `apex`.
 
 File naming is exact, and wrong names are silently ignored by the help server:
 
@@ -67,7 +68,7 @@ Verified against the 1401 SOP and LOP help files shipped with Houdini 22.0:
 
 ## Page shape
 
-```
+```text
 = Scatter By Attribute =
 
 #type: node

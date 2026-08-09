@@ -1,6 +1,6 @@
 # houdini-tools
 
-Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles four skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
+Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles five skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
 
 ## Contents
 
