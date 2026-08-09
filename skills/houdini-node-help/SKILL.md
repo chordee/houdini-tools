@@ -30,7 +30,9 @@ Without a local install, the same two documents are online, and so is every node
 
 - [Documenting your assets](https://www.sidefx.com/docs/houdini/help/nodes.html) — the online `nodes.txt`, including a style-tips section on writing parameter descriptions that say something
 - [Wiki markup reference](https://www.sidefx.com/docs/houdini/help/format.html) — the online `format.txt`
-- Append `.txt` to any help URL to get its raw markup: `https://www.sidefx.com/docs/houdini/nodes/sop/scatter.txt`
+- Any node's page, e.g. [sop/scatter](https://www.sidefx.com/docs/houdini/nodes/sop/scatter.html)
+
+The `.txt` trick from `format.txt` — appending `.txt` to a help URL to see its raw markup — works on the help server Houdini runs locally, not on sidefx.com, where it 404s. For raw markup without a running help server, read `nodes.zip` as above.
 
 Prefer the local copies when Houdini is installed — they match the version being authored against, and the online docs track the current release.
 
@@ -54,7 +56,7 @@ File naming is exact, and wrong names are silently ignored by the help server:
 
 ## What agents get wrong from memory
 
-Verified against the 1401 SOP and LOP help files shipped with Houdini 22.0:
+Each row is what Houdini's own `nodes.txt` prescribes, with a count from the 1401 shipped SOP and LOP files as corroboration:
 
 | Mistake | Correct | Evidence |
 |---|---|---|
@@ -62,7 +64,8 @@ Verified against the 1401 SOP and LOP help files shipped with Houdini 22.0:
 | A `Default:` line under each parameter | Omit it; the default comes from the parameter definition | 11 of 1401 do this |
 | `Input 1:` under `@inputs` | Name what the input *is*: `Geometry to Copy:` | Overwhelming convention |
 | Namespace folded into `#internal` | `#namespace:` and `#internal:` are separate lines | Every namespaced node |
-| `* [Node:sop/x]` in `@related` | `- [Node:sop/x]` | 556 use `-`, 33 use `*` |
+
+`@related` entries take `*` in `nodes.txt`'s own template, while 556 of the shipped files use `-` and 33 use `*`. Both render; follow the documentation and write `*`.
 
 **Do not "fix" the order of `= Title =` and the `#directives`.** Both orders are common in shipped files (821 directive-first, 569 title-first). Neither is wrong.
 
@@ -104,8 +107,8 @@ Scattered points:
 
 @related
 
-- [Node:sop/scatter]
-- [Node:sop/relax]
+* [Node:sop/scatter]
+* [Node:sop/relax]
 ```
 
 `#id:` binds a block to the real parameter name so the text appears beside that parameter in the UI. Get it wrong and the help silently detaches — check it against the actual parm names on the asset, not against the label.
