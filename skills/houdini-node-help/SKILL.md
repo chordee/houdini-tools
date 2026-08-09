@@ -43,7 +43,13 @@ Pick the example from the same context as your node — a SOP for a SOP, a LOP f
 Two options, per Houdini's own `nodes.txt`:
 
 - **The Help tab of the asset's Type Properties.** Usually the best choice for a digital asset — it travels with the asset.
-- **A file under `help/nodes/<dir>/` inside any directory on `HOUDINI_PATH`**, where `<dir>` is the short category name: `obj`, `sop`, `dop`, `cop`, `out`, `lop`, `top`, `chop`, `vop`, `apex`.
+- **A file under `help/nodes/<dir>/` inside any directory on `HOUDINI_PATH`**, where `<dir>` is the short category name. `nodes.txt` gives only a handful as examples and notes the names are "dictated by age-old custom", so read them off the shipped tree rather than guessing:
+
+  ```bash
+  python -c "import zipfile,collections;print(sorted({n.split('/')[0] for n in zipfile.ZipFile(r'\$H/houdini/help/nodes.zip').namelist() if '/' in n}))"
+  ```
+
+  In Houdini 22.0 that is `apex`, `chop`, `cop` (Copernicus), `cop2` (legacy compositing), `dop`, `lop`, `manager`, `obj`, `out`, `shop`, `sop`, `top`, `vex`, `vop`, plus `*_state` directories for viewer states.
 
 File naming is exact, and wrong names are silently ignored by the help server:
 
