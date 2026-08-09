@@ -53,12 +53,18 @@ Two options, per Houdini's own `nodes.txt`:
 
 File naming is exact, and wrong names are silently ignored by the help server:
 
-| Node | Filename |
-|---|---|
-| `bravo` | `bravo.txt` |
-| `com.corp::bravo` | `com.corp--bravo.txt` |
-| `bravo::2` | `bravo-2.txt` |
-| scoped node | `<scope>@<filename>.txt`, slashes in the scope become underscores |
+The documented pattern is `[<namespace>--]<name>[-<version>].txt`, corroborated by shipped filenames:
+
+| Node | Filename | A real one |
+|---|---|---|
+| `bravo` | `bravo.txt` | `scatter.txt` |
+| `com.corp::bravo` | `com.corp--bravo.txt` | `array--Add.txt` |
+| `bravo::2.0` | `bravo-2.0.txt` | `bakegeometrytextures-2.0.txt` |
+| `com.corp::bravo::2.0` | `com.corp--bravo-2.0.txt` | `rig--SampleSplineTransforms-2.0.txt` |
+| scoped node | `<scope>@<filename>.txt`, slashes in the scope become underscores | |
+
+`nodes.txt` illustrates the version case with `bravo--foo-2.txt`, which does not follow its own
+pattern for a node named `bravo` — the shipped files do. Follow the pattern, not that example.
 
 ## What agents get wrong from memory
 
