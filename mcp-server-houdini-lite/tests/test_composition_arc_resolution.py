@@ -28,9 +28,22 @@ def _layer(path, sublayers=(), expression_variables=None):
 
 
 def _referencing_layer(path, asset_path):
+    """A layer whose /Root both references and payloads the same asset path."""
     layer = Sdf.Layer.CreateNew(str(path))
     prim = Sdf.PrimSpec(layer, "Root", Sdf.SpecifierDef)
     prim.referenceList.Add(Sdf.Reference(asset_path, "/Asset"))
+    prim.payloadList.Add(Sdf.Payload(asset_path, "/Asset"))
+    layer.Save()
+    return layer
+
+
+def _internal_arc_layer(path):
+    """Reference and payload with no asset path — they target this layer stack."""
+    layer = Sdf.Layer.CreateNew(str(path))
+    Sdf.PrimSpec(layer, "Source", Sdf.SpecifierDef)
+    target = Sdf.PrimSpec(layer, "Target", Sdf.SpecifierDef)
+    target.referenceList.Add(Sdf.Reference("", "/Source"))
+    target.payloadList.Add(Sdf.Payload("", "/Source"))
     layer.Save()
     return layer
 
@@ -112,11 +125,28 @@ def test_references_and_payloads_gain_the_same_fields(tmp_path):
     _layer(tmp_path / "asset.usda")
     _referencing_layer(tmp_path / "root.usda", "./asset.usda")
 
-    ref = read_composition_arcs(str(tmp_path / "root.usda"))["references"][0]
+    arcs = read_composition_arcs(str(tmp_path / "root.usda"))
+    expected = str(tmp_path / "asset.usda").replace("\\", "/")
 
-    assert ref["asset_path"] == "./asset.usda", "authored string must be untouched"
-    assert ref["resolved_path"] == str(tmp_path / "asset.usda").replace("\\", "/")
-    assert ref["resolved"] == "ok"
+    for kind in ("references", "payloads"):
+        arc = arcs[kind][0]
+        assert arc["asset_path"] == "./asset.usda", f"{kind}: authored string must be untouched"
+        assert arc["resolved_path"] == expected, kind
+        assert arc["resolved"] == "ok", kind
+
+
+def test_an_internal_arc_has_nothing_to_resolve(tmp_path):
+    """An empty asset path targets this layer stack; it is not a failed lookup."""
+    _internal_arc_layer(tmp_path / "root.usda")
+
+    arcs = read_composition_arcs(str(tmp_path / "root.usda"))
+
+    for kind in ("references", "payloads"):
+        arc = arcs[kind][0]
+        assert arc["asset_path"] == "", kind
+        assert arc["target_prim_path"] == "/Source", kind
+        assert arc["resolved"] == "internal", kind
+        assert arc["resolved_path"] is None, kind
 
 
 def test_sublayers_stays_a_list_of_authored_strings(tmp_path):

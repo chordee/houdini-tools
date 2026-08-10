@@ -417,6 +417,11 @@ def _resolve_asset_path(layer, asset_path: str) -> dict:
     the file is found and leaves it alone when it is not, so an unchanged result
     means the search failed, not that the path is already absolute.
     """
+    if asset_path == "":
+        # An internal reference or payload: it targets a prim in this layer
+        # stack, so there is no asset to locate rather than one that was
+        # looked for and missed.
+        return {"resolved_path": None, "resolved": "internal"}
     if "://" in asset_path:
         return {"resolved_path": None, "resolved": "uri"}
     if "`" in asset_path or "${" in asset_path:

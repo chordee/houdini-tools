@@ -440,6 +440,7 @@ Lists the direct composition arcs (sublayers, references, payloads) declared in 
 | `unresolved` | A bare relative name that USD's search did not find; there is no single place it would have come from | `null` |
 | `uri` | An asset-resolver URI such as `omniverse://…`; resolution belongs to the resolver, not to path arithmetic | `null` |
 | `expression` | Contains an unexpanded expression variable, so it is not a path yet | `null` |
+| `internal` | An empty `asset_path`: the arc targets a prim in this layer stack, so there is no asset to locate | `null` |
 
 `sublayers` remains a plain list of authored strings; `sublayers_resolved` carries the same entries in the same order with the resolution attached.
 
