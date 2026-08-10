@@ -20,9 +20,12 @@ $HFS/houdini/help/<first>.zip   →   <rest>.txt
 ```
 
 ```bash
-# H is the Houdini install root — the directory holding bin/ and houdini/.
-# Use the houdini-locator skill if $HFS is not set.
-H="$HFS"
+# H is the Houdini install root — the directory holding bin/ and houdini/,
+# not the path to hython. Use the houdini-locator skill to find it.
+# The :? makes an unset HFS fail here rather than further down: with H empty,
+# the single-file read raises a traceback but the search below just returns
+# nothing, which reads exactly like "the docs do not mention this".
+H="${HFS:?set HFS to the Houdini install root, e.g. /opt/hfs22.0.368}"
 
 # hom/hou/Node.html  →  hom.zip : hou/Node.txt
 python -c "import zipfile;print(zipfile.ZipFile(r'$H/houdini/help/hom.zip').read('hou/Node.txt').decode('utf-8','replace'))"
@@ -34,7 +37,8 @@ parameter tables and examples.
 
 ## Which archive
 
-47 archives, 10450 documents. The ones worth knowing:
+Counts below are from Houdini 22.0.368 — 47 archives, 10450 documents. Another build will
+differ; run the search commands rather than trusting these numbers:
 
 | Archive | Documents | Contents |
 |---|---|---|
@@ -54,6 +58,8 @@ Guessing a filename fails often — `solaris/intro.txt` does not exist, the page
 Search rather than guess again:
 
 ```bash
+H="${HFS:?set HFS to the Houdini install root}"
+
 # By filename — for a node or class whose page you cannot place
 python -c "
 import zipfile,glob,os
@@ -78,7 +84,7 @@ for p in glob.glob(r'$H/houdini/help/*.zip'):
 ## Why this beats the online copy even with a working network
 
 The local set matches the installed build. The online set tracks the current release, so it
-documents methods, parameters and nodes that a older install does not have — and it does so
+documents methods, parameters and nodes that an older install does not have — and it does so
 without any indication that the version differs. An answer sourced from `sidefx.com` and applied
 to an older Houdini can be confidently wrong in a way that is hard to trace.
 
