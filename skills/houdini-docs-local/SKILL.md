@@ -13,7 +13,7 @@ firewall, and it answers for the current release rather than the version in fron
 
 A docs URL maps to a local archive by its first path segment:
 
-```
+```text
 https://www.sidefx.com/docs/houdini/<first>/<rest>.html
                                      ↓
 $HFS/houdini/help/<first>.zip   →   <rest>.txt
