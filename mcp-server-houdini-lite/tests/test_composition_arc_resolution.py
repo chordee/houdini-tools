@@ -178,7 +178,7 @@ def test_a_windows_drive_letter_is_not_mistaken_for_a_scheme():
     """
     from usd_tools import _URI_SCHEME_RE
 
-    for drive_path in ("C:/target.usda", "C:\target.usda", "d:/x.usd"):
+    for drive_path in ("C:/target.usda", r"C:\target.usda", "d:/x.usd"):
         assert not _URI_SCHEME_RE.match(drive_path), drive_path
     for uri in ("omniverse://server/a.usd", "asset:library/model.usda", "ar:pkg"):
         assert _URI_SCHEME_RE.match(uri), uri
@@ -221,7 +221,7 @@ def test_a_package_relative_path_resolves_to_the_package(tmp_path):
 def test_format_arguments_are_not_part_of_the_filename(tmp_path):
     """:SDF_FORMAT_ARGS: carries options, not path components."""
     target = _layer(tmp_path / "a.usd")
-    _layer(tmp_path / "root.usda", ["./a.usd:SDF_FORMAT_ARGS:fps=24"])
+    _layer(tmp_path / "root.usda", ["a.usd:SDF_FORMAT_ARGS:fps=24"])
 
     entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
 

@@ -424,23 +424,22 @@ def _resolve_asset_path(layer, asset_path: str) -> dict:
     the file is found and leaves it alone when it is not, so an unchanged result
     means the search failed, not that the path is already absolute.
     """
-    if asset_path == "":
+    # Strip decorations first: ":SDF_FORMAT_ARGS:…" passes options to the file
+    # format and "bundle.usdz[inner.usd]" names a layer inside a package.
+    # Classifying before stripping reads "a.usd:SDF_FORMAT_ARGS:fps=24" as a
+    # resolver scheme, since everything up to the first colon looks like one.
+    outer = Sdf.Layer.SplitIdentifier(asset_path)[0]
+    outer = Ar.SplitPackageRelativePathOuter(outer)[0]
+
+    if outer == "":
         # An internal reference or payload: it targets a prim in this layer
         # stack, so there is no asset to locate rather than one that was
         # looked for and missed.
         return {"resolved_path": None, "resolved": "internal"}
-    if _URI_SCHEME_RE.match(asset_path):
+    if _URI_SCHEME_RE.match(outer):
         return {"resolved_path": None, "resolved": "uri"}
-    if "`" in asset_path or "${" in asset_path:
+    if "`" in outer or "${" in outer:
         return {"resolved_path": None, "resolved": "expression"}
-
-    # An asset path may carry decorations that are not part of the filename:
-    # ":SDF_FORMAT_ARGS:fps=24" passes options to the file format, and
-    # "bundle.usdz[inner/mesh.usd]" names a layer inside a package. The file on
-    # disk is the outer path in both cases, so strip them with USD's own
-    # splitters before doing any path arithmetic.
-    outer = Sdf.Layer.SplitIdentifier(asset_path)[0]
-    outer = Ar.SplitPackageRelativePathOuter(outer)[0]
 
     absolute = layer.ComputeAbsolutePath(outer)
     if absolute == outer and not Path(outer).is_absolute():
