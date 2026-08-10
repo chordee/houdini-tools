@@ -413,16 +413,37 @@ Lists the direct composition arcs (sublayers, references, payloads) declared in 
   "sublayers": [
     "./lighting.usda"
   ],
+  "sublayers_resolved": [
+    { "asset_path": "./lighting.usda", "resolved_path": "/path/to/lighting.usda", "resolved": "ok" }
+  ],
   "references": [
-    { "prim_path": "/World/car", "asset_path": "./assets/car.usda", "target_prim_path": "" }
+    { "prim_path": "/World/car", "asset_path": "./assets/car.usda", "target_prim_path": "",
+      "resolved_path": "/path/to/assets/car.usda", "resolved": "ok" }
   ],
   "payloads": [
-    { "prim_path": "/World/env", "asset_path": "./env.usda", "target_prim_path": "/Environment" }
+    { "prim_path": "/World/env", "asset_path": "./env.usda", "target_prim_path": "/Environment",
+      "resolved_path": null, "resolved": "uri" }
   ]
 }
 ```
 
 `target_prim_path` is an empty string when the arc targets the default prim.
+
+**Where an asset path points**
+
+`asset_path` is always the string exactly as authored — that is what `usd_replace_anchors`, `usd_add_sublayers` and `usd_remove_sublayers` match on, so it is never rewritten. Alongside it, `resolved_path` says where that string leads and `resolved` says how confident that is:
+
+| `resolved` | Meaning | `resolved_path` |
+|---|---|---|
+| `ok` | Anchored to the layer, and the file is there | absolute path |
+| `missing` | Anchored, but nothing at that location — usually why an arc fails to load | absolute path, so you can see where it looked |
+| `unresolved` | A bare relative name that USD's search did not find; there is no single place it would have come from | `null` |
+| `uri` | An asset-resolver URI such as `omniverse://…`; resolution belongs to the resolver, not to path arithmetic | `null` |
+| `expression` | Contains an unexpanded expression variable, so it is not a path yet | `null` |
+
+`sublayers` remains a plain list of authored strings; `sublayers_resolved` carries the same entries in the same order with the resolution attached.
+
+No resolution is attempted for the three cases that report `null`. USD's own `ComputeAbsolutePath` turns `omniverse://server/a.usd` into `omniverse:/server/a.usd`, which is a corrupted string rather than an answer, so reporting nothing is the honest result.
 
 ---
 
