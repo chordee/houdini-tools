@@ -444,7 +444,9 @@ Lists the direct composition arcs (sublayers, references, payloads) declared in 
 
 `sublayers` remains a plain list of authored strings; `sublayers_resolved` carries the same entries in the same order with the resolution attached.
 
-No resolution is attempted for the three cases that report `null`. USD's own `ComputeAbsolutePath` turns `omniverse://server/a.usd` into `omniverse:/server/a.usd`, which is a corrupted string rather than an answer, so reporting nothing is the honest result.
+`uri`, `expression` and `internal` are decided before any path arithmetic runs — those strings are not filesystem paths to begin with. USD's own `ComputeAbsolutePath` turns `omniverse://server/a.usd` into `omniverse:/server/a.usd`, a corrupted string rather than an answer, so reporting nothing is the honest result.
+
+`unresolved` is different: the path arithmetic does run, and a bare relative name comes back unchanged because USD's search did not find it. There is no single location to report, so that case also yields `null`.
 
 ---
 

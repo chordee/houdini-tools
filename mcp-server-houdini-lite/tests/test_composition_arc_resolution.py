@@ -169,14 +169,29 @@ def test_a_scheme_without_double_slash_is_still_a_uri(tmp_path):
     assert entry["resolved_path"] is None
 
 
-def test_a_windows_drive_letter_is_not_mistaken_for_a_scheme(tmp_path):
-    """C: looks like a scheme but is a drive; only 2+ characters make a scheme."""
+def test_a_windows_drive_letter_is_not_mistaken_for_a_scheme():
+    """C: looks like a scheme but is a drive; only 2+ characters make a scheme.
+
+    Asserted against the pattern directly, because building a real C:-rooted
+    layer only exercises this on Windows and the classifier must behave the
+    same wherever the tests run.
+    """
+    from usd_tools import _URI_SCHEME_RE
+
+    for drive_path in ("C:/target.usda", "C:\target.usda", "d:/x.usd"):
+        assert not _URI_SCHEME_RE.match(drive_path), drive_path
+    for uri in ("omniverse://server/a.usd", "asset:library/model.usda", "ar:pkg"):
+        assert _URI_SCHEME_RE.match(uri), uri
+
+
+def test_an_absolute_path_on_this_platform_resolves(tmp_path):
+    """The integration half: whatever absolute form this OS uses must still work."""
     target = _layer(tmp_path / "target.usda")
     _layer(tmp_path / "root.usda", [target.realPath.replace("\\", "/")])
 
     entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
 
-    assert entry["resolved"] == "ok", "a drive-letter path must resolve normally"
+    assert entry["resolved"] == "ok"
     assert entry["resolved_path"] == target.realPath.replace("\\", "/")
 
 
