@@ -92,6 +92,10 @@ neither is an error:
 
 ## Page shape
 
+A SOP, so `#context`, the `SOP/` icon prefix and the `Node:sop/...` links are all
+context-specific. `#context` is the one to watch when adapting this: get it wrong and the
+page is simply never found for your node, with nothing to indicate why.
+
 ```text
 = Scatter By Attribute =
 
