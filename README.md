@@ -1,6 +1,6 @@
 # houdini-tools
 
-Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles five skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
+Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles six skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
 
 ## Contents
 
@@ -13,6 +13,7 @@ Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bund
 | `houdini-locator` | Detect every Houdini installation on Windows or Linux and return the full path to `hython` / `houdinifx` for direct execution. |
 | `houdini-lite` | Companion guide for the bundled MCP server: bgeo header / metadata / attribute inspection, frame-sequence scans, USD hierarchy and composition arcs, camera reads, prim-attribute queries, and Value Clip stitching. |
 | `houdini-node-help` | Write help documentation for a node or digital asset in Houdini's wiki markup — where the help lives, the file-naming rules the help server enforces, and the details agents get wrong when writing from memory. |
+| `houdini-docs-local` | Read Houdini's documentation from the local install instead of sidefx.com — the URL-to-archive mapping, which archive holds what, and how to search when a path guess misses. For blocked networks, and for answers that match the installed version. |
 
 ### MCP Server
 
@@ -128,7 +129,8 @@ houdini-tools/
     ├── houdini-env/               # Environment variables & package configuration
     ├── houdini-locator/           # Houdini install detection scripts
     ├── houdini-lite/              # MCP tool usage guide
-    └── houdini-node-help/         # Node help authoring format
+    ├── houdini-node-help/         # Node help authoring format
+    └── houdini-docs-local/        # Offline documentation lookup
 ```
 
 ## License
