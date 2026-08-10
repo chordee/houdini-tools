@@ -12,7 +12,8 @@ Houdini node help is not Markdown. It is Houdini's own wiki markup, and the auth
 An agent asked to write node help will usually produce something close to correct from memory, and get the details wrong in ways that break rendering. The details are cheap to look up:
 
 ```bash
-# Adjust the version; use houdini-locator skill to find the install
+# H is the Houdini install root — the directory holding bin/ and houdini/,
+# which is what $HFS points at. Not the path to hython.
 H="$HFS"   # e.g. D:/Programs/Side Effects Software/Houdini 22.0.368
 
 # Node help specifics: where it goes, file naming, page structure (473 lines)
@@ -68,14 +69,22 @@ pattern for a node named `bravo` — the shipped files do. Follow the pattern, n
 
 ## What agents get wrong from memory
 
-Each row is what Houdini's own `nodes.txt` prescribes, with a count from the 1401 shipped SOP and LOP files as corroboration:
+Two are wrong, counted across all 5032 shipped node help files:
 
 | Mistake | Correct | Evidence |
 |---|---|---|
-| `""Summary.""` | `"""Summary."""` — three quotes | 1308 files use `"""`, none use `""` |
-| A `Default:` line under each parameter | Omit it; the default comes from the parameter definition | 11 of 1401 do this |
-| `Input 1:` under `@inputs` | Name what the input *is*: `Geometry to Copy:` | Overwhelming convention |
+| `""Summary.""` | `"""Summary."""` — three quotes | 4498 files use `"""`, none use `""` |
 | Namespace folded into `#internal` | `#namespace:` and `#internal:` are separate lines | Every namespaced node |
+
+Two more are conventions worth following, not rules. Both forms appear in shipped files, so
+neither is an error:
+
+- **A `Default:` line under every parameter** — 32 of 5032 do this. The default already lives
+  in the parameter definition and shows in the UI, so a mechanical `Default:` on each parameter
+  is duplication that drifts. Explaining a default in prose is different and often useful:
+  *Defaults to the first frame.*
+- **`Input 1:` under `@inputs`** — 42 of 5032 do this. Prefer naming what the input is
+  (`Geometry to Copy:`), unless that generic form is genuinely the input's label on the asset.
 
 `@related` entries take `*` in `nodes.txt`'s own template, while 556 of the shipped files use `-` and 33 use `*`. Both render; follow the documentation and write `*`.
 
