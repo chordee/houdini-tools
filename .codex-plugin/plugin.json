@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Houdini Tools",
     "shortDescription": "Houdini CLI, locator, environment, and lightweight scene inspection tools",
-    "longDescription": "Bundles Houdini command-line workflows, installation discovery, Houdini environment references, node help authoring, and a lightweight MCP server for inspecting bgeo and USD files without loading Houdini geometry.",
+    "longDescription": "Bundles Houdini command-line workflows, installation discovery, Houdini environment references, node help authoring, offline documentation lookup, and a lightweight MCP server for inspecting bgeo and USD files without loading Houdini geometry.",
     "developerName": "chordee",
     "category": "Developer Tools",
     "capabilities": [
@@ -22,7 +22,8 @@
       "用 houdini-locator 找 Houdini 安裝路徑",
       "用 houdini-cli 檢查 Houdini 命令列工具",
       "用 houdini-lite 檢查 bgeo 或 USD 檔案",
-      "用 houdini-node-help 撰寫節點說明文件"
+      "用 houdini-node-help 撰寫節點說明文件",
+      "用 houdini-docs-local 從本機安裝查 Houdini 文件"
     ]
   }
 }
