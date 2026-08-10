@@ -1,6 +1,6 @@
 # houdini-tools
 
-Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles four skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
+Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bundles five skills plus a lightweight MCP server for inspecting `.bgeo.sc` caches and USD scene files without loading geometry.
 
 ## Contents
 
@@ -12,6 +12,7 @@ Houdini toolkit plugin for Claude Code, Codex, and Antigravity (CLI & IDE). Bund
 | `houdini-env` | Houdini environment variables, `houdini.env` syntax, and JSON package configuration. Covers `HOUDINI_PATH`, `HOUDINI_DSO_PATH`, `HOUDINI_USER_PREF_DIR`, package scan order, expression grammar, and best practices. |
 | `houdini-locator` | Detect every Houdini installation on Windows or Linux and return the full path to `hython` / `houdinifx` for direct execution. |
 | `houdini-lite` | Companion guide for the bundled MCP server: bgeo header / metadata / attribute inspection, frame-sequence scans, USD hierarchy and composition arcs, camera reads, prim-attribute queries, and Value Clip stitching. |
+| `houdini-node-help` | Write help documentation for a node or digital asset in Houdini's wiki markup — where the help lives, the file-naming rules the help server enforces, and the details agents get wrong when writing from memory. |
 
 ### MCP Server
 
@@ -126,7 +127,8 @@ houdini-tools/
     │   └── references/            # Per-tool deep dives (husk, usdrecord, …)
     ├── houdini-env/               # Environment variables & package configuration
     ├── houdini-locator/           # Houdini install detection scripts
-    └── houdini-lite/              # MCP tool usage guide
+    ├── houdini-lite/              # MCP tool usage guide
+    └── houdini-node-help/         # Node help authoring format
 ```
 
 ## License
