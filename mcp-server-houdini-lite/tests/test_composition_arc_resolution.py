@@ -203,3 +203,27 @@ def test_a_directory_target_is_not_a_usable_layer(tmp_path):
     entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
 
     assert entry["resolved"] == "missing"
+
+
+def test_a_package_relative_path_resolves_to_the_package(tmp_path):
+    """foo.usdz[inner.usd] names a layer inside a package; the file is the package."""
+    package = tmp_path / "bundle.usdz"
+    package.write_bytes(b"")
+    _layer(tmp_path / "root.usda", ["./bundle.usdz[inner/mesh.usd]"])
+
+    entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
+
+    assert entry["asset_path"] == "./bundle.usdz[inner/mesh.usd]", "authored string kept"
+    assert entry["resolved_path"] == str(package).replace("\\", "/")
+    assert entry["resolved"] == "ok"
+
+
+def test_format_arguments_are_not_part_of_the_filename(tmp_path):
+    """:SDF_FORMAT_ARGS: carries options, not path components."""
+    target = _layer(tmp_path / "a.usd")
+    _layer(tmp_path / "root.usda", ["./a.usd:SDF_FORMAT_ARGS:fps=24"])
+
+    entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
+
+    assert entry["resolved_path"] == target.realPath.replace("\\", "/")
+    assert entry["resolved"] == "ok"

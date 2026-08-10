@@ -442,6 +442,8 @@ Lists the direct composition arcs (sublayers, references, payloads) declared in 
 | `expression` | Contains an unexpanded expression variable, so it is not a path yet | `null` |
 | `internal` | An empty `asset_path`: the arc targets a prim in this layer stack, so there is no asset to locate | `null` |
 
+An asset path may carry decorations that are not part of the filename — `:SDF_FORMAT_ARGS:fps=24` passes options to the file format, and `bundle.usdz[inner/mesh.usd]` names a layer inside a package. Those are stripped before resolution, so `resolved_path` points at the file on disk (`bundle.usdz`) while `asset_path` keeps the string as authored.
+
 `sublayers` remains a plain list of authored strings; `sublayers_resolved` carries the same entries in the same order with the resolution attached.
 
 `uri`, `expression` and `internal` are decided before any path arithmetic runs — those strings are not filesystem paths to begin with. USD's own `ComputeAbsolutePath` turns `omniverse://server/a.usd` into `omniverse:/server/a.usd`, a corrupted string rather than an answer, so reporting nothing is the honest result.

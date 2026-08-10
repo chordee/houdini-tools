@@ -24,7 +24,7 @@ Write functions:
 import re
 from pathlib import Path
 
-from pxr import Sdf, Tf, Usd, UsdGeom, Gf, Vt
+from pxr import Ar, Sdf, Tf, Usd, UsdGeom, Gf, Vt
 
 # Collect all Gf quaternion types (Quath was added in later USD versions)
 _GF_QUAT_TYPES = tuple(
@@ -434,8 +434,16 @@ def _resolve_asset_path(layer, asset_path: str) -> dict:
     if "`" in asset_path or "${" in asset_path:
         return {"resolved_path": None, "resolved": "expression"}
 
-    absolute = layer.ComputeAbsolutePath(asset_path)
-    if absolute == asset_path and not Path(asset_path).is_absolute():
+    # An asset path may carry decorations that are not part of the filename:
+    # ":SDF_FORMAT_ARGS:fps=24" passes options to the file format, and
+    # "bundle.usdz[inner/mesh.usd]" names a layer inside a package. The file on
+    # disk is the outer path in both cases, so strip them with USD's own
+    # splitters before doing any path arithmetic.
+    outer = Sdf.Layer.SplitIdentifier(asset_path)[0]
+    outer = Ar.SplitPackageRelativePathOuter(outer)[0]
+
+    absolute = layer.ComputeAbsolutePath(outer)
+    if absolute == outer and not Path(outer).is_absolute():
         return {"resolved_path": None, "resolved": "unresolved"}
 
     absolute = absolute.replace("\\", "/")
