@@ -157,3 +157,34 @@ def test_sublayers_stays_a_list_of_authored_strings(tmp_path):
 
     assert arcs["sublayers"] == ["./a.usda", "b.usda"]
     assert [e["asset_path"] for e in arcs["sublayers_resolved"]] == ["./a.usda", "b.usda"]
+
+
+def test_a_scheme_without_double_slash_is_still_a_uri(tmp_path):
+    """USD dispatches on the scheme; asset:… never reaches the filesystem."""
+    _layer(tmp_path / "root.usda", ["asset:library/model.usda"])
+
+    entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
+
+    assert entry["resolved"] == "uri"
+    assert entry["resolved_path"] is None
+
+
+def test_a_windows_drive_letter_is_not_mistaken_for_a_scheme(tmp_path):
+    """C: looks like a scheme but is a drive; only 2+ characters make a scheme."""
+    target = _layer(tmp_path / "target.usda")
+    _layer(tmp_path / "root.usda", [target.realPath.replace("\\", "/")])
+
+    entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
+
+    assert entry["resolved"] == "ok", "a drive-letter path must resolve normally"
+    assert entry["resolved_path"] == target.realPath.replace("\\", "/")
+
+
+def test_a_directory_target_is_not_a_usable_layer(tmp_path):
+    """Path.exists() is true for a directory, which cannot be opened as a layer."""
+    (tmp_path / "assets").mkdir()
+    _layer(tmp_path / "root.usda", ["./assets"])
+
+    entry = read_composition_arcs(str(tmp_path / "root.usda"))["sublayers_resolved"][0]
+
+    assert entry["resolved"] == "missing"

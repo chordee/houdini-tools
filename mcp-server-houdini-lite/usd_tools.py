@@ -21,6 +21,7 @@ Write functions:
   remove_sublayers               — remove sublayer asset paths by exact string
 """
 
+import re
 from pathlib import Path
 
 from pxr import Sdf, Tf, Usd, UsdGeom, Gf, Vt
@@ -406,6 +407,12 @@ def read_composed_hierarchy(path: str, max_depth: int = 0) -> dict:
     }
 
 
+# A resolver scheme, e.g. "omniverse://…" or "asset:library/model.usda". USD
+# dispatches on the scheme, with or without the double slash. Two or more
+# characters before the colon keeps Windows drive letters (C:/…, C:\…) out.
+_URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+:")
+
+
 def _resolve_asset_path(layer, asset_path: str) -> dict:
     """Say where an authored asset path points, or why that cannot be determined.
 
@@ -422,7 +429,7 @@ def _resolve_asset_path(layer, asset_path: str) -> dict:
         # stack, so there is no asset to locate rather than one that was
         # looked for and missed.
         return {"resolved_path": None, "resolved": "internal"}
-    if "://" in asset_path:
+    if _URI_SCHEME_RE.match(asset_path):
         return {"resolved_path": None, "resolved": "uri"}
     if "`" in asset_path or "${" in asset_path:
         return {"resolved_path": None, "resolved": "expression"}
@@ -432,7 +439,7 @@ def _resolve_asset_path(layer, asset_path: str) -> dict:
         return {"resolved_path": None, "resolved": "unresolved"}
 
     absolute = absolute.replace("\\", "/")
-    exists = Path(absolute).exists()
+    exists = Path(absolute).is_file()
     return {"resolved_path": absolute, "resolved": "ok" if exists else "missing"}
 
 
@@ -453,7 +460,7 @@ def read_composition_arcs(path: str) -> dict:
     asset_path is always the string as authored, which is what replace_anchors
     matches on. resolved_path is where it points, or None when that cannot be
     determined by path arithmetic; resolved says which: ok, missing, unresolved,
-    uri or expression.
+    uri, expression or internal.
 
     Raises:
         FileNotFoundError  — file does not exist
