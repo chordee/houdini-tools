@@ -21,9 +21,10 @@ Write functions:
   remove_sublayers               — remove sublayer asset paths by exact string
 """
 
+import re
 from pathlib import Path
 
-from pxr import Sdf, Tf, Usd, UsdGeom, Gf, Vt
+from pxr import Ar, Sdf, Tf, Usd, UsdGeom, Gf, Vt
 
 # Collect all Gf quaternion types (Quath was added in later USD versions)
 _GF_QUAT_TYPES = tuple(
@@ -406,6 +407,49 @@ def read_composed_hierarchy(path: str, max_depth: int = 0) -> dict:
     }
 
 
+# A resolver scheme, e.g. "omniverse://…" or "asset:library/model.usda". USD
+# dispatches on the scheme, with or without the double slash. Two or more
+# characters before the colon keeps Windows drive letters (C:/…, C:\…) out.
+_URI_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+:")
+
+
+def _resolve_asset_path(layer, asset_path: str) -> dict:
+    """Say where an authored asset path points, or why that cannot be determined.
+
+    Path arithmetic answers this only for filesystem paths. An asset-resolver URI
+    is the resolver's business — ComputeAbsolutePath would return
+    "omniverse:/server/a.usd" for "omniverse://server/a.usd", a broken string
+    rather than an answer — and an unexpanded expression variable is not yet a
+    path at all. A bare relative name uses search semantics: USD anchors it when
+    the file is found and leaves it alone when it is not, so an unchanged result
+    means the search failed, not that the path is already absolute.
+    """
+    # Strip decorations first: ":SDF_FORMAT_ARGS:…" passes options to the file
+    # format and "bundle.usdz[inner.usd]" names a layer inside a package.
+    # Classifying before stripping reads "a.usd:SDF_FORMAT_ARGS:fps=24" as a
+    # resolver scheme, since everything up to the first colon looks like one.
+    outer = Sdf.Layer.SplitIdentifier(asset_path)[0]
+    outer = Ar.SplitPackageRelativePathOuter(outer)[0]
+
+    if outer == "":
+        # An internal reference or payload: it targets a prim in this layer
+        # stack, so there is no asset to locate rather than one that was
+        # looked for and missed.
+        return {"resolved_path": None, "resolved": "internal"}
+    if _URI_SCHEME_RE.match(outer):
+        return {"resolved_path": None, "resolved": "uri"}
+    if "`" in outer or "${" in outer:
+        return {"resolved_path": None, "resolved": "expression"}
+
+    absolute = layer.ComputeAbsolutePath(outer)
+    if absolute == outer and not Path(outer).is_absolute():
+        return {"resolved_path": None, "resolved": "unresolved"}
+
+    absolute = absolute.replace("\\", "/")
+    exists = Path(absolute).is_file()
+    return {"resolved_path": absolute, "resolved": "ok" if exists else "missing"}
+
+
 def read_composition_arcs(path: str) -> dict:
     """
     List the direct composition arcs declared in a single USD layer:
@@ -414,9 +458,16 @@ def read_composition_arcs(path: str) -> dict:
 
     Returns a dict with keys:
         path        — input file path
-        sublayers   — ordered list of sublayer asset paths (weakest last)
-        references  — list of {prim_path, asset_path, target_prim_path}
-        payloads    — list of {prim_path, asset_path, target_prim_path}
+        sublayers   — ordered list of sublayer asset paths as authored (weakest last)
+        sublayers_resolved — same order, each {asset_path, resolved_path, resolved}
+        references  — list of {prim_path, asset_path, target_prim_path,
+                               resolved_path, resolved}
+        payloads    — same shape as references
+
+    asset_path is always the string as authored, which is what replace_anchors
+    matches on. resolved_path is where it points, or None when that cannot be
+    determined by path arithmetic; resolved says which: ok, missing, unresolved,
+    uri, expression or internal.
 
     Raises:
         FileNotFoundError  — file does not exist
@@ -426,6 +477,9 @@ def read_composition_arcs(path: str) -> dict:
     layer = _open_layer(path)
 
     sublayers = list(layer.subLayerPaths)
+    sublayers_resolved = [
+        {"asset_path": a, **_resolve_asset_path(layer, a)} for a in sublayers
+    ]
 
     references: list[dict] = []
     payloads:   list[dict] = []
@@ -442,12 +496,14 @@ def read_composition_arcs(path: str) -> dict:
                 "prim_path":        prim_str,
                 "asset_path":       ref.assetPath,
                 "target_prim_path": str(ref.primPath),
+                **_resolve_asset_path(layer, ref.assetPath),
             })
         for pay in spec.payloadList.GetAppliedItems():
             payloads.append({
                 "prim_path":        prim_str,
                 "asset_path":       pay.assetPath,
                 "target_prim_path": str(pay.primPath),
+                **_resolve_asset_path(layer, pay.assetPath),
             })
 
     layer.Traverse(layer.pseudoRoot.path, _collect)
@@ -455,6 +511,7 @@ def read_composition_arcs(path: str) -> dict:
     return {
         "path":       path,
         "sublayers":  sublayers,
+        "sublayers_resolved": sublayers_resolved,
         "references": references,
         "payloads":   payloads,
     }

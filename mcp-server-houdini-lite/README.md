@@ -413,16 +413,42 @@ Lists the direct composition arcs (sublayers, references, payloads) declared in 
   "sublayers": [
     "./lighting.usda"
   ],
+  "sublayers_resolved": [
+    { "asset_path": "./lighting.usda", "resolved_path": "/path/to/lighting.usda", "resolved": "ok" }
+  ],
   "references": [
-    { "prim_path": "/World/car", "asset_path": "./assets/car.usda", "target_prim_path": "" }
+    { "prim_path": "/World/car", "asset_path": "./assets/car.usda", "target_prim_path": "",
+      "resolved_path": "/path/to/assets/car.usda", "resolved": "ok" }
   ],
   "payloads": [
-    { "prim_path": "/World/env", "asset_path": "./env.usda", "target_prim_path": "/Environment" }
+    { "prim_path": "/World/env", "asset_path": "omniverse://server/env.usda",
+      "target_prim_path": "/Environment", "resolved_path": null, "resolved": "uri" }
   ]
 }
 ```
 
 `target_prim_path` is an empty string when the arc targets the default prim.
+
+**Where an asset path points**
+
+`asset_path` is always the string exactly as authored — that is what `usd_replace_anchors`, `usd_add_sublayers` and `usd_remove_sublayers` match on, so it is never rewritten. Alongside it, `resolved_path` says where that string leads and `resolved` says how confident that is:
+
+| `resolved` | Meaning | `resolved_path` |
+|---|---|---|
+| `ok` | Anchored to the layer, and a file is there — a directory does not count | absolute path |
+| `missing` | Anchored, but nothing at that location — usually why an arc fails to load | absolute path, so you can see where it looked |
+| `unresolved` | A bare relative name that USD's search did not find; there is no single place it would have come from | `null` |
+| `uri` | An asset-resolver scheme such as `omniverse://…` or `asset:…`; resolution belongs to the resolver, not to path arithmetic. A Windows drive letter is not a scheme | `null` |
+| `expression` | Contains an unexpanded expression variable, so it is not a path yet | `null` |
+| `internal` | An empty `asset_path`: the arc targets a prim in this layer stack, so there is no asset to locate | `null` |
+
+An asset path may carry decorations that are not part of the filename — `:SDF_FORMAT_ARGS:fps=24` passes options to the file format, and `bundle.usdz[inner/mesh.usd]` names a layer inside a package. Those are stripped before resolution, so `resolved_path` points at the file on disk (`bundle.usdz`) while `asset_path` keeps the string as authored.
+
+`sublayers` remains a plain list of authored strings; `sublayers_resolved` carries the same entries in the same order with the resolution attached.
+
+`uri`, `expression` and `internal` are decided before any path arithmetic runs — those strings are not filesystem paths to begin with. USD's own `ComputeAbsolutePath` turns `omniverse://server/a.usd` into `omniverse:/server/a.usd`, a corrupted string rather than an answer, so reporting nothing is the honest result.
+
+`unresolved` is different: the path arithmetic does run, and a bare relative name comes back unchanged because USD's search did not find it. There is no single location to report, so that case also yields `null`.
 
 ---
 
