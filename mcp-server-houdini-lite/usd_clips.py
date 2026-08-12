@@ -147,6 +147,55 @@ def find_all_animated_prims(probe_frame_path: str, root_primpath: str) -> list[s
 
 
 # ---------------------------------------------------------------------------
+# Output paths
+# ---------------------------------------------------------------------------
+
+def prepare_clip_outputs(
+    output_path: str,
+    gen_topology: bool,
+    gen_manifest: bool,
+    error: type[Exception],
+) -> tuple[str, str, str]:
+    """Derive the sidecar paths a stitch writes, refusing to clobber anything.
+
+    Returns (out_dir, topology_path, manifest_path).
+
+    Usd.Stage.CreateNew and open(path, "w") both truncate an existing file
+    without complaining, so this check is the only thing between a re-run and
+    the caller's previous output. It has to happen before the first write:
+    topology and manifest are generated ahead of the output stage, so a guard
+    placed any later would already have destroyed two files the caller never
+    named.
+
+    Only sidecars this call will actually write are considered — with
+    gen_topology off, an existing topology file is not this call's business.
+    The caller's own exception type is raised so its handler still translates
+    the failure instead of leaking a traceback.
+    """
+    out_dir = os.path.dirname(os.path.abspath(output_path))
+    out_stem = os.path.splitext(os.path.basename(output_path))[0]
+    out_ext = os.path.splitext(output_path)[1] or ".usd"
+    topology_path = os.path.join(out_dir, f"{out_stem}.topology{out_ext}")
+    manifest_path = os.path.join(out_dir, f"{out_stem}.manifest{out_ext}")
+
+    targets = [output_path]
+    if gen_topology:
+        targets.append(topology_path)
+    if gen_manifest:
+        targets.append(manifest_path)
+
+    existing = [p for p in targets if os.path.exists(p)]
+    if existing:
+        raise error(
+            f"refusing to overwrite, already exists: {existing}. "
+            f"A stitch writes the output stage plus <stem>.topology and "
+            f"<stem>.manifest beside it; remove them or pick another output_path."
+        )
+
+    return out_dir, topology_path, manifest_path
+
+
+# ---------------------------------------------------------------------------
 # Topology generator
 # ---------------------------------------------------------------------------
 
@@ -279,6 +328,10 @@ def stitch_clips(
     if fps is not None:
         _validate_fps(fps, "fps")
 
+    out_dir, topology_path, manifest_path = prepare_clip_outputs(
+        output_path, gen_topology, gen_manifest, StitchClipsError
+    )
+
     if scene_range is None:
         scene_range = frame_range
 
@@ -339,13 +392,6 @@ def stitch_clips(
         target_primpaths = find_all_animated_prims(probe_path, primpath)
     else:
         target_primpaths = [clip_primpath]
-
-    # --- 5. Determine topology / manifest paths (same directory as output) ---
-    out_dir  = os.path.dirname(os.path.abspath(output_path))
-    out_stem = os.path.splitext(os.path.basename(output_path))[0]
-    out_ext  = os.path.splitext(output_path)[1] or ".usd"
-    topology_path = os.path.join(out_dir, f"{out_stem}.topology{out_ext}")
-    manifest_path = os.path.join(out_dir, f"{out_stem}.manifest{out_ext}")
 
     # --- 6. Generate topology ---
     if gen_topology:

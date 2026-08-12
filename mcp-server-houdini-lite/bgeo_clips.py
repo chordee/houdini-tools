@@ -19,6 +19,7 @@ from pathlib import Path
 from pxr import Usd, UsdGeom, Sdf
 
 from bgeo_reader import BJSON_MAGIC, read_bgeo_clip_metadata
+from usd_clips import prepare_clip_outputs
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +402,10 @@ def stitch_bgeo_clips(
     if not math.isfinite(fps) or fps <= 0:
         raise BgeoClipsError(f"fps must be a finite positive number, got: {fps!r}")
 
+    out_dir, topology_path, manifest_path = prepare_clip_outputs(
+        output_path, gen_topology, gen_manifest, BgeoClipsError
+    )
+
     # --- 1. Build frame map {scene_frame: bgeo_path} ---
     auto_detected_frame_range = frame_range is None
     if auto_detected_frame_range:
@@ -533,13 +538,6 @@ def stitch_bgeo_clips(
         filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]
 
     print(f"[INFO] Scene frames: {scene_frames[0]}–{scene_frames[-1]}  ({len(scene_frames)} frames)")
-
-    # --- 6. Determine topology / manifest paths ---
-    out_dir  = os.path.dirname(os.path.abspath(output_path))
-    out_stem = os.path.splitext(os.path.basename(output_path))[0]
-    out_ext  = os.path.splitext(output_path)[1] or ".usd"
-    topology_path = os.path.join(out_dir, f"{out_stem}.topology{out_ext}")
-    manifest_path = os.path.join(out_dir, f"{out_stem}.manifest{out_ext}")
 
     # --- 7. Generate topology ---
     if gen_topology:

@@ -71,9 +71,19 @@ _CONSTRAINT_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"
 # timeCodesPerSecond, producing a file with a nonsense frame rate and no error. The
 # baseline records the old, unvalidated schema; this entry records that we chose to
 # diverge from it.
+#
+# usd_read_prim_attributes.limit and usd_read_attribute_value.max_elements gain
+# minimum: 0 for the same reason as usd_stitch_clips.fps — a deliberate
+# divergence from the baseline, not a preserved constraint. Both are used as
+# slice bounds, so a negative value did not fail: limit=-1 evaluated attrs[:-1]
+# and quietly dropped the last attribute, and max_elements=-1 returned an empty
+# list still flagged array_truncated. Refusing beats answering wrongly. Zero
+# stays legal — asking for none of them is coherent.
 _EXPECTED_NEW_CONSTRAINTS = {
     ("bgeo_stitch_usd_clips", "fps"): {"exclusiveMinimum": 0},
     ("usd_stitch_clips", "fps"): {"exclusiveMinimum": 0},
+    ("usd_read_prim_attributes", "limit"): {"minimum": 0},
+    ("usd_read_attribute_value", "max_elements"): {"minimum": 0},
 }
 
 
