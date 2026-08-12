@@ -1,7 +1,7 @@
 {
   "name": "houdini-tools",
   "description": "Houdini toolkit including command-line tools, installation path detection, and a bgeo/USD MCP server",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "author": {
     "name": "chordee"
   },
