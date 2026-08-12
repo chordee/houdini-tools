@@ -80,6 +80,7 @@ async def test_zero_limit_is_still_a_legal_request(stage_path):
 
     assert not refused, f"limit=0 must stay legal, got: {payload}"
     assert payload["attributes"] == []
+    assert payload["truncated"] is True, "an empty result must say it was cut short"
 
 
 @pytest.mark.anyio
@@ -97,6 +98,7 @@ async def test_zero_max_elements_is_still_a_legal_request(stage_path):
     assert not refused, f"max_elements=0 must stay legal, got: {payload}"
     assert payload["value"] == []
     assert payload["array_total"] == 6
+    assert payload["array_truncated"] is True, "an empty array must say it was cut short"
 
 
 @pytest.mark.anyio
