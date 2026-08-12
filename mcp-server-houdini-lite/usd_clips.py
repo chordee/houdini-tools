@@ -150,27 +150,37 @@ def find_all_animated_prims(probe_frame_path: str, root_primpath: str) -> list[s
 # Output paths
 # ---------------------------------------------------------------------------
 
-def prepare_clip_outputs(
+def reserve_clip_outputs(
     output_path: str,
     gen_topology: bool,
     gen_manifest: bool,
     error: type[Exception],
-) -> tuple[str, str, str]:
-    """Derive the sidecar paths a stitch writes, refusing to clobber anything.
+) -> tuple[str, str, str, list[str]]:
+    """Claim every file this stitch will write, refusing to clobber anything.
 
-    Returns (out_dir, topology_path, manifest_path).
+    Returns (out_dir, topology_path, manifest_path, reserved).
 
     Usd.Stage.CreateNew and open(path, "w") both truncate an existing file
-    without complaining, so this check is the only thing between a re-run and
+    without complaining, so this claim is the only thing between a re-run and
     the caller's previous output. It has to happen before the first write:
     topology and manifest are generated ahead of the output stage, so a guard
     placed any later would already have destroyed two files the caller never
     named.
 
-    Only sidecars this call will actually write are considered — with
-    gen_topology off, an existing topology file is not this call's business.
-    The caller's own exception type is raised so its handler still translates
-    the failure instead of leaking a traceback.
+    The claim is an exclusive create rather than an existence check, because
+    the two are not the same under concurrency: sync tool handlers run in
+    threads, so two stitches aimed at one output can both clear a
+    check-then-write test and the loser truncates the winner. O_EXCL makes the
+    test and the claim a single operation.
+
+    Only sidecars this call will actually write are claimed — with gen_topology
+    off, an existing topology file is not this call's business. The caller's
+    own exception type is raised so its handler still translates the failure
+    instead of leaking a traceback.
+
+    The placeholders are empty; the writers truncate them in passing. Hand the
+    returned list to release_clip_outputs if the stitch fails, so a failed run
+    leaves nothing behind to block the next attempt.
     """
     out_dir = os.path.dirname(os.path.abspath(output_path))
     out_stem = os.path.splitext(os.path.basename(output_path))[0]
@@ -184,15 +194,37 @@ def prepare_clip_outputs(
     if gen_manifest:
         targets.append(manifest_path)
 
-    existing = [p for p in targets if os.path.exists(p)]
-    if existing:
-        raise error(
-            f"refusing to overwrite, already exists: {existing}. "
-            f"A stitch writes the output stage plus <stem>.topology and "
-            f"<stem>.manifest beside it; remove them or pick another output_path."
-        )
+    os.makedirs(out_dir, exist_ok=True)
 
-    return out_dir, topology_path, manifest_path
+    reserved: list[str] = []
+    for path in targets:
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            release_clip_outputs(reserved)
+            raise error(
+                f"refusing to overwrite, already exists: {path}. "
+                f"A stitch writes the output stage plus <stem>.topology and "
+                f"<stem>.manifest beside it; remove them or pick another output_path."
+            ) from None
+        reserved.append(path)
+
+    return out_dir, topology_path, manifest_path, reserved
+
+
+def release_clip_outputs(reserved: list[str]) -> None:
+    """Drop the files a failed stitch reserved, and nothing else.
+
+    Only paths this call created are passed in, so the caller's pre-existing
+    files are never at risk. Removal failures are swallowed deliberately: this
+    runs while an exception is propagating, and the original failure is the one
+    worth reporting.
+    """
+    for path in reserved:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -328,149 +360,153 @@ def stitch_clips(
     if fps is not None:
         _validate_fps(fps, "fps")
 
-    out_dir, topology_path, manifest_path = prepare_clip_outputs(
+    out_dir, topology_path, manifest_path, reserved = reserve_clip_outputs(
         output_path, gen_topology, gen_manifest, StitchClipsError
     )
 
-    if scene_range is None:
-        scene_range = frame_range
+    try:
 
-    if clip_primpath is None:
-        clip_primpath = primpath
+        if scene_range is None:
+            scene_range = frame_range
 
-    # --- 1. Build frame lists ---
-    scene_frames, file_frames = build_clip_frame_lists(frame_range, scene_range, loop)
-    print(f"[INFO] Scene frames : {scene_frames[0]} – {scene_frames[-1]}  ({len(scene_frames)} frames)")
-    print(f"[INFO] File frames  : {file_frames[0]} – {file_frames[-1]}  (loop={loop})")
+        if clip_primpath is None:
+            clip_primpath = primpath
 
-    # --- 2. Expand per-frame paths ---
-    filepaths = [resolve_filepath(filepath_template, f) for f in range(frame_range[0], frame_range[1] + 1)]
-    missing = validate_files(filepaths, strict=strict)
+        # --- 1. Build frame lists ---
+        scene_frames, file_frames = build_clip_frame_lists(frame_range, scene_range, loop)
+        print(f"[INFO] Scene frames : {scene_frames[0]} – {scene_frames[-1]}  ({len(scene_frames)} frames)")
+        print(f"[INFO] File frames  : {file_frames[0]} – {file_frames[-1]}  (loop={loop})")
 
-    # --- 3. Determine probe frame path ---
-    if probe_frame is not None:
-        if not (frame_range[0] <= probe_frame <= frame_range[1]):
-            raise StitchClipsError(
-                f"probe_frame {probe_frame} is outside frame_range "
-                f"{frame_range[0]}–{frame_range[1]}."
-            )
-        probe_path = resolve_filepath(filepath_template, probe_frame)
+        # --- 2. Expand per-frame paths ---
+        filepaths = [resolve_filepath(filepath_template, f) for f in range(frame_range[0], frame_range[1] + 1)]
+        missing = validate_files(filepaths, strict=strict)
+
+        # --- 3. Determine probe frame path ---
+        if probe_frame is not None:
+            if not (frame_range[0] <= probe_frame <= frame_range[1]):
+                raise StitchClipsError(
+                    f"probe_frame {probe_frame} is outside frame_range "
+                    f"{frame_range[0]}–{frame_range[1]}."
+                )
+            probe_path = resolve_filepath(filepath_template, probe_frame)
+            if not os.path.exists(probe_path):
+                raise FileNotFoundError(f"probe frame file does not exist: {probe_path}")
+            print(f"[INFO] Probe frame  : {probe_frame}  ({probe_path})")
+        else:
+            probe_frame = frame_range[0]
+            probe_path = filepaths[0]
+            print(f"[INFO] Probe frame  : {probe_frame} (default — first frame)")
+
         if not os.path.exists(probe_path):
             raise FileNotFoundError(f"probe frame file does not exist: {probe_path}")
-        print(f"[INFO] Probe frame  : {probe_frame}  ({probe_path})")
-    else:
-        probe_frame = frame_range[0]
-        probe_path = filepaths[0]
-        print(f"[INFO] Probe frame  : {probe_frame} (default — first frame)")
 
-    if not os.path.exists(probe_path):
-        raise FileNotFoundError(f"probe frame file does not exist: {probe_path}")
+        try:
+            probe_stage = Usd.Stage.Open(probe_path)
+        except Tf.ErrorException as e:
+            raise StitchClipsError(f"could not open probe stage: {probe_path}") from e
+        if probe_stage is None:
+            raise StitchClipsError(f"could not open probe stage: {probe_path}")
 
-    try:
-        probe_stage = Usd.Stage.Open(probe_path)
-    except Tf.ErrorException as e:
-        raise StitchClipsError(f"could not open probe stage: {probe_path}") from e
-    if probe_stage is None:
-        raise StitchClipsError(f"could not open probe stage: {probe_path}")
+        # --- 3b. Resolve fps now, before anything is written ---
+        # Auto-detection needs the probe frame, but validating it after topology,
+        # manifest and the output stage exist would leave that partial output behind.
+        if fps is None:
+            fps = probe_stage.GetTimeCodesPerSecond()
+            _validate_fps(fps, f"fps auto-detected from timeCodesPerSecond of probe frame {probe_path}")
+            print(f"[INFO] FPS auto-detected : {fps} (from probe frame)")
+        else:
+            print(f"[INFO] FPS (manual)      : {fps}")
 
-    # --- 3b. Resolve fps now, before anything is written ---
-    # Auto-detection needs the probe frame, but validating it after topology,
-    # manifest and the output stage exist would leave that partial output behind.
-    if fps is None:
-        fps = probe_stage.GetTimeCodesPerSecond()
-        _validate_fps(fps, f"fps auto-detected from timeCodesPerSecond of probe frame {probe_path}")
-        print(f"[INFO] FPS auto-detected : {fps} (from probe frame)")
-    else:
-        print(f"[INFO] FPS (manual)      : {fps}")
+        for name, path in (("primpath", primpath), ("clip_primpath", clip_primpath)):
+            if not probe_stage.GetPrimAtPath(path).IsValid():
+                raise StitchClipsError(f"{name} not found in probe frame: {path}")
 
-    for name, path in (("primpath", primpath), ("clip_primpath", clip_primpath)):
-        if not probe_stage.GetPrimAtPath(path).IsValid():
-            raise StitchClipsError(f"{name} not found in probe frame: {path}")
+        # --- 4. Auto-detect animated child prims ---
+        if auto_detect_prim:
+            target_primpaths = find_all_animated_prims(probe_path, primpath)
+        else:
+            target_primpaths = [clip_primpath]
 
-    # --- 4. Auto-detect animated child prims ---
-    if auto_detect_prim:
-        target_primpaths = find_all_animated_prims(probe_path, primpath)
-    else:
-        target_primpaths = [clip_primpath]
+        # --- 6. Generate topology ---
+        if gen_topology:
+            generate_topology(probe_path, primpath, topology_path)
 
-    # --- 6. Generate topology ---
-    if gen_topology:
-        generate_topology(probe_path, primpath, topology_path)
+        # --- 7. Generate manifest ---
+        if gen_manifest:
+            generate_manifest(probe_path, primpath, manifest_path)
 
-    # --- 7. Generate manifest ---
-    if gen_manifest:
-        generate_manifest(probe_path, primpath, manifest_path)
+        # --- 8. Create output stage ---
+        stage = Usd.Stage.CreateNew(output_path)
+        stage.SetStartTimeCode(scene_frames[0])
+        stage.SetEndTimeCode(scene_frames[-1])
 
-    # --- 8. Create output stage ---
-    os.makedirs(out_dir, exist_ok=True)
-    stage = Usd.Stage.CreateNew(output_path)
-    stage.SetStartTimeCode(scene_frames[0])
-    stage.SetEndTimeCode(scene_frames[-1])
+        stage.SetTimeCodesPerSecond(fps)
+        stage.SetFramesPerSecond(fps)
 
-    stage.SetTimeCodesPerSecond(fps)
-    stage.SetFramesPerSecond(fps)
+        # --- 9. Ensure root prim exists ---
+        root_prim = stage.DefinePrim(primpath)
+        if not root_prim.IsValid():
+            raise StitchClipsError(f"failed to define prim on stage: {primpath}")
 
-    # --- 9. Ensure root prim exists ---
-    root_prim = stage.DefinePrim(primpath)
-    if not root_prim.IsValid():
-        raise StitchClipsError(f"failed to define prim on stage: {primpath}")
+        top_name = Sdf.Path(primpath).GetPrefixes()[0]
+        top_prim = stage.GetPrimAtPath(top_name)
+        if not top_prim.IsValid():
+            top_prim = stage.DefinePrim(top_name)
+        stage.SetDefaultPrim(top_prim)
+        print(f"[INFO] defaultPrim       : {top_name}")
 
-    top_name = Sdf.Path(primpath).GetPrefixes()[0]
-    top_prim = stage.GetPrimAtPath(top_name)
-    if not top_prim.IsValid():
-        top_prim = stage.DefinePrim(top_name)
-    stage.SetDefaultPrim(top_prim)
-    print(f"[INFO] defaultPrim       : {top_name}")
+        # --- 10. Set Clips API ---
+        asset_paths = [Sdf.AssetPath(p) for p in filepaths]
+        times = [(float(s), float(f)) for s, f in zip(scene_frames, file_frames)]
 
-    # --- 10. Set Clips API ---
-    asset_paths = [Sdf.AssetPath(p) for p in filepaths]
-    times = [(float(s), float(f)) for s, f in zip(scene_frames, file_frames)]
+        clip_api = Usd.ClipsAPI(root_prim)
+        clip_api.SetClipAssetPaths(asset_paths, clip_set)
+        clip_api.SetClipPrimPath(clip_primpath, clip_set)
+        clip_api.SetClipTimes(times, clip_set)
+        active = [(float(s), float(ff - frame_range[0])) for s, ff in zip(scene_frames, file_frames, strict=True)]
+        clip_api.SetClipActive(active, clip_set)
+        if gen_manifest:
+            clip_api.SetClipManifestAssetPath(Sdf.AssetPath(manifest_path), clip_set)
 
-    clip_api = Usd.ClipsAPI(root_prim)
-    clip_api.SetClipAssetPaths(asset_paths, clip_set)
-    clip_api.SetClipPrimPath(clip_primpath, clip_set)
-    clip_api.SetClipTimes(times, clip_set)
-    active = [(float(s), float(ff - frame_range[0])) for s, ff in zip(scene_frames, file_frames, strict=True)]
-    clip_api.SetClipActive(active, clip_set)
-    if gen_manifest:
-        clip_api.SetClipManifestAssetPath(Sdf.AssetPath(manifest_path), clip_set)
+        if gen_topology:
+            layer = stage.GetRootLayer()
+            topo_rel = os.path.relpath(topology_path, out_dir).replace("\\", "/")
+            layer.subLayerPaths.append(topo_rel)
 
-    if gen_topology:
-        layer = stage.GetRootLayer()
-        topo_rel = os.path.relpath(topology_path, out_dir).replace("\\", "/")
-        layer.subLayerPaths.append(topo_rel)
+        # --- 11. Save ---
+        stage.GetRootLayer().Save()
+        print(f"[INFO] Output written → {output_path}")
 
-    # --- 11. Save ---
-    stage.GetRootLayer().Save()
-    print(f"[INFO] Output written → {output_path}")
+        # --- 12. Summary ---
+        print("\n=== Clip Settings Summary ===")
+        print(f"  Clip Set           : {clip_set}")
+        print(f"  Root Prim          : {primpath}")
+        print(f"  Animated Prims     : {len(target_primpaths)}")
+        for tp in target_primpaths:
+            print(f"                       {tp}")
+        print(f"  Asset Paths        : {len(asset_paths)} file(s)")
+        print(f"  FPS                : {fps}")
+        print(f"  Topology           : {topology_path if gen_topology else '(skipped)'}")
+        print(f"  Manifest           : {manifest_path if gen_manifest else '(skipped)'}")
 
-    # --- 12. Summary ---
-    print("\n=== Clip Settings Summary ===")
-    print(f"  Clip Set           : {clip_set}")
-    print(f"  Root Prim          : {primpath}")
-    print(f"  Animated Prims     : {len(target_primpaths)}")
-    for tp in target_primpaths:
-        print(f"                       {tp}")
-    print(f"  Asset Paths        : {len(asset_paths)} file(s)")
-    print(f"  FPS                : {fps}")
-    print(f"  Topology           : {topology_path if gen_topology else '(skipped)'}")
-    print(f"  Manifest           : {manifest_path if gen_manifest else '(skipped)'}")
-
-    return {
-        "status": "ok",
-        "output_path": output_path,
-        "topology_path": topology_path if gen_topology else None,
-        "manifest_path": manifest_path if gen_manifest else None,
-        "clip_set": clip_set,
-        "primpath": primpath,
-        "fps": fps,
-        "frame_range": list(frame_range),
-        "scene_range": list(scene_range),
-        "loop": loop,
-        "frame_count": len(file_frames),
-        "scene_frame_count": len(scene_frames),
-        "missing_files": missing,
-        "animated_prims": target_primpaths,
-        "auto_detect_prim": auto_detect_prim,
-        "probe_frame": probe_frame,
-    }
+        return {
+            "status": "ok",
+            "output_path": output_path,
+            "topology_path": topology_path if gen_topology else None,
+            "manifest_path": manifest_path if gen_manifest else None,
+            "clip_set": clip_set,
+            "primpath": primpath,
+            "fps": fps,
+            "frame_range": list(frame_range),
+            "scene_range": list(scene_range),
+            "loop": loop,
+            "frame_count": len(file_frames),
+            "scene_frame_count": len(scene_frames),
+            "missing_files": missing,
+            "animated_prims": target_primpaths,
+            "auto_detect_prim": auto_detect_prim,
+            "probe_frame": probe_frame,
+        }
+    except BaseException:
+        release_clip_outputs(reserved)
+        raise

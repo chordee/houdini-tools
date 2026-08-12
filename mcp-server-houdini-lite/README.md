@@ -759,7 +759,7 @@ Stitches per-frame USD cache files into a single USD Value Clips stage. Automati
 |-----------|------|----------|-------------|
 | `filepath_template` | string | yes | Per-frame path template. Supports `{frame:04d}` or `$F4` format |
 | `primpath` | string | yes | Target prim path on the output stage, e.g. `/Geometry` |
-| `output_path` | string | yes | Absolute output path (`.usd` / `.usda` / `.usdc`). Must not already exist, and neither may the `.topology` / `.manifest` files generated beside it. |
+| `output_path` | string | yes | Absolute output path (`.usd` / `.usda` / `.usdc`). Must not already exist — nor may `<stem>.topology` / `<stem>.manifest`, each checked only when `gen_topology` / `gen_manifest` is enabled. |
 | `frame_range` | [int, int] | yes | Source file frame range `[start, end]` (inclusive) |
 | `scene_range` | [int, int] | no | Scene timeline range (defaults to `frame_range`) |
 | `loop` | boolean | no | Loop file frames to fill `scene_range` (default: `false`) |
@@ -825,7 +825,7 @@ When `path` is present, every value must be an absolute USD path **and** a desce
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `filepath_template` | string | yes | Per-frame path template. Supports `{frame:04d}` or `$F4` format |
-| `output_path` | string | yes | Absolute output path (`.usd` / `.usda` / `.usdc`). Must not already exist, and neither may the `.topology` / `.manifest` files generated beside it. |
+| `output_path` | string | yes | Absolute output path (`.usd` / `.usda` / `.usdc`). Must not already exist — nor may `<stem>.topology` / `<stem>.manifest`, each checked only when `gen_topology` / `gen_manifest` is enabled. |
 | `frame_range` | [int, int] | no | Source file frame range `[start, end]`. Auto-detected from `usdconfigsampleframe` if omitted |
 | `primpath` | string | no | Prim path on the output stage. Auto-detected from `usdconfigpathprefix` if omitted |
 | `scene_range` | [int, int] | no | Scene timeline range (defaults to `frame_range`) |

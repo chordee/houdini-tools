@@ -25,7 +25,7 @@ from pxr import Usd, UsdGeom
 
 import server
 from bgeo_clips import BgeoClipsError, stitch_bgeo_clips
-from usd_clips import StitchClipsError, stitch_clips
+from usd_clips import StitchClipsError, reserve_clip_outputs, stitch_clips
 
 SENTINEL = "DO NOT DESTROY ME\n"
 
@@ -107,6 +107,42 @@ def test_a_clean_target_directory_still_stitches(tmp_path):
     """The guard must not turn every ordinary run into a refusal."""
     assert _stitch_usd(tmp_path)["status"] == "ok"
     assert (tmp_path / "out.usda").exists()
+
+
+def test_the_claim_is_materialized_not_merely_checked(tmp_path):
+    """Two stitches must not both clear the guard and race to the same output.
+
+    Sync tool handlers run concurrently in threads, so a check-then-write guard
+    leaves a window where both callers see an absent file and the loser
+    truncates the winner. Reserving with O_EXCL closes it: the second claim
+    fails because the first one left a file behind, which an existence check
+    alone never would.
+    """
+    output_path = str(tmp_path / "out.usda")
+    reserve_clip_outputs(output_path, True, True, StitchClipsError)
+
+    with pytest.raises(StitchClipsError, match="already exists"):
+        reserve_clip_outputs(output_path, True, True, StitchClipsError)
+
+
+def test_a_losing_claim_does_not_strand_the_files_it_got(tmp_path):
+    """Partial reservations are released, or one refusal poisons the path."""
+    (tmp_path / "out.manifest.usda").write_text(SENTINEL)
+
+    with pytest.raises(StitchClipsError, match="already exists"):
+        reserve_clip_outputs(str(tmp_path / "out.usda"), True, True, StitchClipsError)
+
+    stranded = sorted(p.name for p in tmp_path.glob("out.*"))
+    assert stranded == ["out.manifest.usda"], f"stranded: {stranded}"
+
+
+def test_a_failed_bgeo_stitch_leaves_nothing_behind(tmp_path):
+    """The reservation must be released when the stitch fails after it."""
+    with pytest.raises(BgeoClipsError):
+        _stitch_bgeo(tmp_path, primpath="not/absolute")
+
+    leftovers = sorted(p.name for p in tmp_path.glob("out.*"))
+    assert leftovers == [], f"partial output left behind: {leftovers}"
 
 
 @pytest.mark.anyio
