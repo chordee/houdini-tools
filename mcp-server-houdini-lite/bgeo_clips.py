@@ -19,6 +19,7 @@ from pathlib import Path
 from pxr import Usd, UsdGeom, Sdf
 
 from bgeo_reader import BJSON_MAGIC, read_bgeo_clip_metadata
+from usd_clips import release_clip_outputs, reserve_clip_outputs
 
 
 # ---------------------------------------------------------------------------
@@ -401,201 +402,202 @@ def stitch_bgeo_clips(
     if not math.isfinite(fps) or fps <= 0:
         raise BgeoClipsError(f"fps must be a finite positive number, got: {fps!r}")
 
-    # --- 1. Build frame map {scene_frame: bgeo_path} ---
-    auto_detected_frame_range = frame_range is None
-    if auto_detected_frame_range:
-        # _scan_directory raises with a cause-specific message when it finds
-        # nothing, so frame_map is non-empty here.
-        frame_map = _scan_directory(filepath_template)
-        sorted_frames = sorted(frame_map.keys())
-        frame_range = (sorted_frames[0], sorted_frames[-1])
-        filepaths = [frame_map[f] for f in sorted_frames]
-        file_frames = sorted_frames
-        print(f"[INFO] Auto-detected {len(file_frames)} frame(s): "
-              f"{frame_range[0]}–{frame_range[1]}")
-    else:
-        if frame_range[0] > frame_range[1]:
-            raise BgeoClipsError(
-                f"invalid frame_range: start ({frame_range[0]}) > end ({frame_range[1]})"
-            )
-        all_frames = list(range(frame_range[0], frame_range[1] + 1))
-        filepaths = [_resolve_frame(filepath_template, f) for f in all_frames]
-        file_frames = all_frames
-
-    if not file_frames:
-        raise BgeoClipsError("no frames resolved from frame_range")
-
-    # --- 2. Validate files ---
-    missing = [p for p in filepaths if not os.path.exists(p)]
-    if missing:
-        msg = f"[WARNING] {len(missing)} file(s) missing"
-        if strict:
-            raise BgeoClipsError(f"strict mode: {msg}")
-        print(msg)
-
-    # --- 3. Determine probe path ---
-    if probe_file is not None:
-        if not os.path.exists(probe_file):
-            raise FileNotFoundError(f"probe file not found: {probe_file}")
-        probe_path = probe_file
-        print(f"[INFO] Probe file (explicit): {probe_path}")
-    elif probe_frame is not None:
-        probe_path = _resolve_frame(filepath_template, probe_frame)
-        if not os.path.exists(probe_path):
-            raise FileNotFoundError(f"probe frame file not found: {probe_path}")
-        print(f"[INFO] Probe frame: {probe_frame}  ({probe_path})")
-    else:
-        probe_path = filepaths[0]
-        print(f"[INFO] Probe frame: {file_frames[0]} (default — first frame)")
-
-    # --- 4. Auto-detect primpath ---
-    probe_meta = _read_meta(probe_path)
-    if primpath is None:
-        primpath = probe_meta["primpath"]
-        if not primpath:
-            raise BgeoClipsError(
-                "usdconfigpathprefix not found in probe bgeo.sc; "
-                "specify primpath explicitly."
-            )
-        print(f"[INFO] Auto-detected primpath: {primpath}")
-
-    if not Sdf.Path(primpath).IsAbsolutePath():
-        raise BgeoClipsError(
-            f"primpath must be an absolute USD path (e.g. '/Geometry'), got: {primpath!r}"
-        )
-
-    # --- 4b. Cross-check: every 'path' attribute value must be a descendant
-    # of primpath. A mismatch means the bgeo was authored with inconsistent
-    # USD configuration (e.g. path='/Geo/X' but usdconfigpathprefix='/Geometry')
-    # and the resulting USD clip stage would attach time samples to the wrong
-    # branch. Surface this loudly instead of producing a broken output.
-    bgeo_prim_paths = probe_meta["prim_paths"]
-    if bgeo_prim_paths:
-        primpath_sdf = Sdf.Path(primpath)
-        non_absolute = [pp for pp in bgeo_prim_paths if not Sdf.Path(pp).IsAbsolutePath()]
-        if non_absolute:
-            raise BgeoClipsError(
-                f"bgeo 'path' attribute value(s) {non_absolute} are not absolute USD "
-                f"paths (probe: {probe_path}). Only absolute paths are supported."
-            )
-        misplaced = [
-            pp for pp in bgeo_prim_paths
-            if not Sdf.Path(pp).HasPrefix(primpath_sdf)
-        ]
-        if misplaced:
-            raise BgeoClipsError(
-                f"bgeo 'path' attribute value(s) {misplaced} are not descendants of "
-                f"usdconfigpathprefix '{primpath}' (probe: {probe_path}). "
-                f"This stitcher requires every 'path' value to share the '{primpath}' "
-                f"prefix so clip samples reach the Mesh prim(s). Fix the source bgeo, "
-                f"or pass primpath explicitly."
-            )
-
-    # --- 5. Scene range and loop ---
-    default_scene_range = scene_range is None
-    if default_scene_range:
-        scene_range = frame_range
-
-    if scene_range[0] > scene_range[1]:
-        raise BgeoClipsError(
-            f"invalid scene_range: start ({scene_range[0]}) > end ({scene_range[1]})"
-        )
-
-    auto_scene_from_files = auto_detected_frame_range and default_scene_range
-    _MAX_SCENE_FRAMES = 100_000
-    if (
-        loop
-        and not auto_scene_from_files
-        and len(file_frames) < (scene_range[1] - scene_range[0] + 1)
-    ):
-        scene_len = scene_range[1] - scene_range[0] + 1
-        if scene_len > _MAX_SCENE_FRAMES:
-            raise BgeoClipsError(
-                f"scene_range spans {scene_len} frames, exceeds limit of {_MAX_SCENE_FRAMES}"
-            )
-        mul = scene_len // len(file_frames) + 1
-        file_frames = (file_frames * mul)
-
-    if auto_scene_from_files:
-        scene_frames = list(file_frames)
-    else:
-        scene_frames = list(range(scene_range[0], scene_range[1] + 1))
-    paired = list(zip(scene_frames, file_frames))
-    scene_frames = [p[0] for p in paired]
-    file_frames  = [p[1] for p in paired]
-    # Rebuild filepaths to match the (possibly looped) file_frames. When the
-    # range was auto-detected, the scanned paths are authoritative: a sample
-    # frame need not equal the frame number in the filename, so re-resolving
-    # the template here would point at the wrong file, or at none at all.
-    if auto_detected_frame_range:
-        filepaths = [frame_map[f] for f in file_frames]
-    else:
-        filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]
-
-    print(f"[INFO] Scene frames: {scene_frames[0]}–{scene_frames[-1]}  ({len(scene_frames)} frames)")
-
-    # --- 6. Determine topology / manifest paths ---
-    out_dir  = os.path.dirname(os.path.abspath(output_path))
-    out_stem = os.path.splitext(os.path.basename(output_path))[0]
-    out_ext  = os.path.splitext(output_path)[1] or ".usd"
-    topology_path = os.path.join(out_dir, f"{out_stem}.topology{out_ext}")
-    manifest_path = os.path.join(out_dir, f"{out_stem}.manifest{out_ext}")
-
-    # --- 7. Generate topology ---
-    if gen_topology:
-        _generate_topology_from_bgeo(probe_path, topology_path, primpath)
-
-    # --- 8. Generate manifest ---
-    if gen_manifest:
-        _generate_manifest_from_bgeo(probe_path, manifest_path, primpath)
-
-    # bgeo.sc has no FPS metadata, so the caller must provide it (default 24).
-    print(f"[INFO] FPS: {fps}")
-
-    # --- 9. Write USDA text directly ---
-    # usd-core validates clip assetPaths by trying to open them to detect
-    # the file format.  Since bgeo.sc is not a recognized USD format, any
-    # ClipsAPI / SdfLayer approach raises pxr.Tf.ErrorException.
-    # Writing USDA text directly bypasses all validation.
-    os.makedirs(out_dir, exist_ok=True)
-    prefixes = Sdf.Path(primpath).GetPrefixes()
-    if not prefixes:
-        raise BgeoClipsError(f"primpath has no prefixes (root path not allowed): {primpath}")
-    top_name = str(prefixes[0])
-    top_prim_name = top_name.lstrip("/")
-
-    _write_usda_clips(
-        output_path=output_path,
-        start_tc=scene_frames[0],
-        end_tc=scene_frames[-1],
-        fps=fps,
-        default_prim=top_prim_name,
-        topology_rel=(
-            os.path.relpath(topology_path, out_dir).replace("\\", "/")
-            if gen_topology else None
-        ),
-        manifest_rel=(
-            os.path.relpath(manifest_path, out_dir).replace("\\", "/")
-            if gen_manifest else None
-        ),
-        clip_set=clip_set,
-        primpath=primpath,
-        asset_paths=filepaths,
-        scene_frames=scene_frames,
-        file_frames=file_frames,
+    out_dir, topology_path, manifest_path, reserved = reserve_clip_outputs(
+        output_path, gen_topology, gen_manifest, BgeoClipsError
     )
-    print(f"[INFO] Output written → {output_path}")
 
-    return {
-        "status": "ok",
-        "output_path": output_path,
-        "topology_path": topology_path if gen_topology else None,
-        "manifest_path": manifest_path if gen_manifest else None,
-        "clip_set": clip_set,
-        "primpath": primpath,
-        "fps": fps,
-        "frame_range": list(frame_range),
-        "scene_range": list(scene_range),
-        "frame_count": len(scene_frames),
-        "missing_files": missing,
-    }
+    try:
+
+        # --- 1. Build frame map {scene_frame: bgeo_path} ---
+        auto_detected_frame_range = frame_range is None
+        if auto_detected_frame_range:
+            # _scan_directory raises with a cause-specific message when it finds
+            # nothing, so frame_map is non-empty here.
+            frame_map = _scan_directory(filepath_template)
+            sorted_frames = sorted(frame_map.keys())
+            frame_range = (sorted_frames[0], sorted_frames[-1])
+            filepaths = [frame_map[f] for f in sorted_frames]
+            file_frames = sorted_frames
+            print(f"[INFO] Auto-detected {len(file_frames)} frame(s): "
+                  f"{frame_range[0]}–{frame_range[1]}")
+        else:
+            if frame_range[0] > frame_range[1]:
+                raise BgeoClipsError(
+                    f"invalid frame_range: start ({frame_range[0]}) > end ({frame_range[1]})"
+                )
+            all_frames = list(range(frame_range[0], frame_range[1] + 1))
+            filepaths = [_resolve_frame(filepath_template, f) for f in all_frames]
+            file_frames = all_frames
+
+        if not file_frames:
+            raise BgeoClipsError("no frames resolved from frame_range")
+
+        # --- 2. Validate files ---
+        missing = [p for p in filepaths if not os.path.exists(p)]
+        if missing:
+            msg = f"[WARNING] {len(missing)} file(s) missing"
+            if strict:
+                raise BgeoClipsError(f"strict mode: {msg}")
+            print(msg)
+
+        # --- 3. Determine probe path ---
+        if probe_file is not None:
+            if not os.path.exists(probe_file):
+                raise FileNotFoundError(f"probe file not found: {probe_file}")
+            probe_path = probe_file
+            print(f"[INFO] Probe file (explicit): {probe_path}")
+        elif probe_frame is not None:
+            probe_path = _resolve_frame(filepath_template, probe_frame)
+            if not os.path.exists(probe_path):
+                raise FileNotFoundError(f"probe frame file not found: {probe_path}")
+            print(f"[INFO] Probe frame: {probe_frame}  ({probe_path})")
+        else:
+            probe_path = filepaths[0]
+            print(f"[INFO] Probe frame: {file_frames[0]} (default — first frame)")
+
+        # --- 4. Auto-detect primpath ---
+        probe_meta = _read_meta(probe_path)
+        if primpath is None:
+            primpath = probe_meta["primpath"]
+            if not primpath:
+                raise BgeoClipsError(
+                    "usdconfigpathprefix not found in probe bgeo.sc; "
+                    "specify primpath explicitly."
+                )
+            print(f"[INFO] Auto-detected primpath: {primpath}")
+
+        if not Sdf.Path(primpath).IsAbsolutePath():
+            raise BgeoClipsError(
+                f"primpath must be an absolute USD path (e.g. '/Geometry'), got: {primpath!r}"
+            )
+
+        # --- 4b. Cross-check: every 'path' attribute value must be a descendant
+        # of primpath. A mismatch means the bgeo was authored with inconsistent
+        # USD configuration (e.g. path='/Geo/X' but usdconfigpathprefix='/Geometry')
+        # and the resulting USD clip stage would attach time samples to the wrong
+        # branch. Surface this loudly instead of producing a broken output.
+        bgeo_prim_paths = probe_meta["prim_paths"]
+        if bgeo_prim_paths:
+            primpath_sdf = Sdf.Path(primpath)
+            non_absolute = [pp for pp in bgeo_prim_paths if not Sdf.Path(pp).IsAbsolutePath()]
+            if non_absolute:
+                raise BgeoClipsError(
+                    f"bgeo 'path' attribute value(s) {non_absolute} are not absolute USD "
+                    f"paths (probe: {probe_path}). Only absolute paths are supported."
+                )
+            misplaced = [
+                pp for pp in bgeo_prim_paths
+                if not Sdf.Path(pp).HasPrefix(primpath_sdf)
+            ]
+            if misplaced:
+                raise BgeoClipsError(
+                    f"bgeo 'path' attribute value(s) {misplaced} are not descendants of "
+                    f"usdconfigpathprefix '{primpath}' (probe: {probe_path}). "
+                    f"This stitcher requires every 'path' value to share the '{primpath}' "
+                    f"prefix so clip samples reach the Mesh prim(s). Fix the source bgeo, "
+                    f"or pass primpath explicitly."
+                )
+
+        # --- 5. Scene range and loop ---
+        default_scene_range = scene_range is None
+        if default_scene_range:
+            scene_range = frame_range
+
+        if scene_range[0] > scene_range[1]:
+            raise BgeoClipsError(
+                f"invalid scene_range: start ({scene_range[0]}) > end ({scene_range[1]})"
+            )
+
+        auto_scene_from_files = auto_detected_frame_range and default_scene_range
+        _MAX_SCENE_FRAMES = 100_000
+        if (
+            loop
+            and not auto_scene_from_files
+            and len(file_frames) < (scene_range[1] - scene_range[0] + 1)
+        ):
+            scene_len = scene_range[1] - scene_range[0] + 1
+            if scene_len > _MAX_SCENE_FRAMES:
+                raise BgeoClipsError(
+                    f"scene_range spans {scene_len} frames, exceeds limit of {_MAX_SCENE_FRAMES}"
+                )
+            mul = scene_len // len(file_frames) + 1
+            file_frames = (file_frames * mul)
+
+        if auto_scene_from_files:
+            scene_frames = list(file_frames)
+        else:
+            scene_frames = list(range(scene_range[0], scene_range[1] + 1))
+        paired = list(zip(scene_frames, file_frames))
+        scene_frames = [p[0] for p in paired]
+        file_frames  = [p[1] for p in paired]
+        # Rebuild filepaths to match the (possibly looped) file_frames. When the
+        # range was auto-detected, the scanned paths are authoritative: a sample
+        # frame need not equal the frame number in the filename, so re-resolving
+        # the template here would point at the wrong file, or at none at all.
+        if auto_detected_frame_range:
+            filepaths = [frame_map[f] for f in file_frames]
+        else:
+            filepaths = [_resolve_frame(filepath_template, f) for f in file_frames]
+
+        print(f"[INFO] Scene frames: {scene_frames[0]}–{scene_frames[-1]}  ({len(scene_frames)} frames)")
+
+        # --- 7. Generate topology ---
+        if gen_topology:
+            _generate_topology_from_bgeo(probe_path, topology_path, primpath)
+
+        # --- 8. Generate manifest ---
+        if gen_manifest:
+            _generate_manifest_from_bgeo(probe_path, manifest_path, primpath)
+
+        # bgeo.sc has no FPS metadata, so the caller must provide it (default 24).
+        print(f"[INFO] FPS: {fps}")
+
+        # --- 9. Write USDA text directly ---
+        # usd-core validates clip assetPaths by trying to open them to detect
+        # the file format.  Since bgeo.sc is not a recognized USD format, any
+        # ClipsAPI / SdfLayer approach raises pxr.Tf.ErrorException.
+        # Writing USDA text directly bypasses all validation.
+        prefixes = Sdf.Path(primpath).GetPrefixes()
+        if not prefixes:
+            raise BgeoClipsError(f"primpath has no prefixes (root path not allowed): {primpath}")
+        top_name = str(prefixes[0])
+        top_prim_name = top_name.lstrip("/")
+
+        _write_usda_clips(
+            output_path=output_path,
+            start_tc=scene_frames[0],
+            end_tc=scene_frames[-1],
+            fps=fps,
+            default_prim=top_prim_name,
+            topology_rel=(
+                os.path.relpath(topology_path, out_dir).replace("\\", "/")
+                if gen_topology else None
+            ),
+            manifest_rel=(
+                os.path.relpath(manifest_path, out_dir).replace("\\", "/")
+                if gen_manifest else None
+            ),
+            clip_set=clip_set,
+            primpath=primpath,
+            asset_paths=filepaths,
+            scene_frames=scene_frames,
+            file_frames=file_frames,
+        )
+        print(f"[INFO] Output written → {output_path}")
+
+        return {
+            "status": "ok",
+            "output_path": output_path,
+            "topology_path": topology_path if gen_topology else None,
+            "manifest_path": manifest_path if gen_manifest else None,
+            "clip_set": clip_set,
+            "primpath": primpath,
+            "fps": fps,
+            "frame_range": list(frame_range),
+            "scene_range": list(scene_range),
+            "frame_count": len(scene_frames),
+            "missing_files": missing,
+        }
+    except BaseException:
+        release_clip_outputs(reserved)
+        raise
