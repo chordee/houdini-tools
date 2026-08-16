@@ -184,6 +184,44 @@ def test_every_time_sample_of_a_sequence_is_reported(tmp_path):
     assert sorted(a["frame"] for a in result["assets"]) == [1.0, 2.0, 3.0]
 
 
+def test_a_default_value_is_reported_alongside_its_time_samples(tmp_path):
+    """An attribute can hold both, and the default is a real authored reference.
+
+    Time samples shadow it at every numeric time code, so no renderer reads it
+    on a frame — but it is what evaluating at the default time returns, and it
+    is a path in the file. Omitting it hides a broken reference.
+    """
+
+    def build(stage):
+        attr = UsdShade.Shader.Define(stage, "/mtl/tex").CreateInput(
+            "file", Sdf.ValueTypeNames.Asset
+        ).GetAttr()
+        attr.Set(Sdf.AssetPath("./tex/default.png"))
+        attr.Set(Sdf.AssetPath("./tex/f10.png"), 10)
+
+    _touch(tmp_path, "tex", "default.png")
+    _touch(tmp_path, "tex", "f10.png")
+    path = _stage_with(tmp_path, build)
+
+    records = {a["asset_path"]: a["frame"] for a in read_asset_paths(path)["assets"]}
+
+    assert records == {"./tex/default.png": None, "./tex/f10.png": 10.0}
+
+
+def test_a_pure_sequence_gains_no_phantom_default_record(tmp_path):
+    """Get() returns None when only samples exist — reading it must add nothing."""
+
+    def build(stage):
+        attr = UsdVol.OpenVDBAsset.Define(stage, "/vol/d").CreateFilePathAttr()
+        attr.Set(Sdf.AssetPath("./c/s.0001.vdb"), 1)
+
+    path = _stage_with(tmp_path, build)
+
+    frames = [a["frame"] for a in read_asset_paths(path)["assets"]]
+
+    assert frames == [1.0], "a default record would appear here as None"
+
+
 def test_each_element_of_an_asset_array_gets_its_own_record(tmp_path):
     def build(stage):
         shader = UsdShade.Shader.Define(stage, "/mtl/tex")

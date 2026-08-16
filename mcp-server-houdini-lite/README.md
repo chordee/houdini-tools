@@ -680,7 +680,10 @@ Resolution goes through the composed stage, so a texture referenced from another
 | `volume` | A `UsdVol.OpenVDBAsset` prim |
 | `other` | Any remaining asset-valued attribute |
 
-`asset_path` is always the string exactly as authored. Time-sampled attributes report one record per sample with the sample time in `frame`, because a cache sequence authors a different path per frame; `frame` is `null` for a default value. `asset_count` is the total found before `limit` was applied.
+`asset_path` is always the string exactly as authored. `asset_count` is the total found before `limit` was applied.
+
+An attribute's default value and its time samples are both reported — one record each, with `frame` holding the sample time and `null` marking the default. A cache sequence authors a different path per frame, so reading only the default would report one file for a sequence of hundreds; and where an attribute carries both, the default is still an authored path whose file can be missing, even though the samples shadow it at every numeric time code.
+
 ---
 
 #### `usd_read_layer_dependencies`

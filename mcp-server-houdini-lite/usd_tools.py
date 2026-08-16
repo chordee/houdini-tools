@@ -26,6 +26,7 @@ Write functions:
 """
 
 import re
+from collections import deque
 from pathlib import Path
 
 from pxr import Ar, Sdf, Tf, Usd, UsdGeom, UsdLux, UsdShade, UsdVol, Gf, Vt
@@ -716,23 +717,32 @@ def _classify_asset(asset_path) -> tuple[str | None, str]:
 def _asset_values(attr):
     """Yield (frame, Sdf.AssetPath) for every value the attribute holds.
 
-    Time samples are walked rather than just the default value: a cache
-    sequence authors one path per frame, so reading only the default reports a
-    single file for a sequence of hundreds — or nothing at all.
+    Both the default and every time sample are read, because an attribute can
+    carry both and each is a real authored reference. Time samples shadow the
+    default at every numeric time code, so nothing evaluates it on a frame —
+    but it is a path in the file, and skipping it hides a broken one. Reading
+    the samples matters for the opposite reason: a cache sequence authors one
+    path per frame, so the default alone reports one file for a sequence of
+    hundreds.
+
+    Get() returns None when only samples are authored, so asking for it
+    unconditionally adds no phantom record to a pure sequence.
     """
-    times = attr.GetTimeSamples()
-    for frame in (times or [None]):
-        value = attr.Get() if frame is None else attr.Get(frame)
+    def _each(frame, value):
         if value is None:
-            continue
+            return
         if isinstance(value, Sdf.AssetPath):
             yield frame, value
-            continue
+            return
         try:
             for item in value:
                 yield frame, item
         except TypeError:
-            continue
+            return
+
+    yield from _each(None, attr.Get())
+    for frame in attr.GetTimeSamples():
+        yield from _each(frame, attr.Get(frame))
 
 
 def read_asset_paths(
@@ -872,10 +882,10 @@ def read_layer_dependencies(path: str, limit: int = 500) -> dict:
     root_key = _norm(root.realPath or root.identifier)
     visited = {root_key}
     dependencies = []
-    queue = [(root, 1)]
+    queue = deque([(root, 1)])
 
     while queue:
-        layer, depth = queue.pop(0)
+        layer, depth = queue.popleft()
         introduced_by = _norm(layer.realPath or layer.identifier)
         for dep in layer.GetCompositionAssetDependencies():
             absolute = _norm(layer.ComputeAbsolutePath(dep))
