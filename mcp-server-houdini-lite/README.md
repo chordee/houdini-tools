@@ -601,6 +601,86 @@ Reads the value of a single named attribute on a USD prim. Stage is opened with 
 | `Sdf.AssetPath` | resolved path string |
 | `Sdf.ValueBlock` | `null` |
 | `Vt.Array` | list of elements (truncated to `max_elements`) |
+---
+
+#### `usd_read_asset_paths`
+
+Finds every file a USD scene points at — shader textures, light HDRIs, VDB caches — and reports whether each one is actually on disk. Use this to audit a scene for broken paths; the alternative is one `usd_read_prim_attributes` plus one `usd_read_attribute_value` per shader.
+
+The scan is by **attribute type**, not by prim type: any attribute typed `asset` or `asset[]` is reported. This matters because a `DomeLight` is not a `UsdShade.Shader`, so a shader-only walk would silently omit the HDRI of a lighting scene. Each record carries a `kind` so callers can narrow to just the textures.
+
+Resolution goes through the composed stage, so a texture referenced from another layer anchors against **that layer**, not the root — matching what a renderer will do.
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to a USD file |
+| `prim_path` | string | no | Absolute prim path to walk from (default: `/`, the whole stage) |
+| `kind` | string | no | Keep only `"texture"`, `"light"`, `"volume"` or `"other"`. Omit for all. |
+| `limit` | integer | no | Maximum records returned (default: `500`) |
+| `load_payloads` | boolean | no | Load USD payloads. Required when materials live inside a payload (default: `false`) |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/shots/sh010/look.usda",
+  "prim_path": "/",
+  "asset_count": 3,
+  "truncated": false,
+  "assets": [
+    {
+      "prim_path": "/mtl/surface/diffuse",
+      "attribute": "inputs:file",
+      "frame": null,
+      "asset_path": "./tex/albedo.<UDIM>.exr",
+      "resolved_path": null,
+      "resolved": "udim",
+      "kind": "texture"
+    },
+    {
+      "prim_path": "/lights/dome",
+      "attribute": "inputs:texture:file",
+      "frame": null,
+      "asset_path": "./hdri/studio.exr",
+      "resolved_path": "/shots/sh010/hdri/studio.exr",
+      "resolved": "ok",
+      "kind": "light"
+    },
+    {
+      "prim_path": "/vol/density",
+      "attribute": "filePath",
+      "frame": 1001.0,
+      "asset_path": "./cache/smoke.1001.vdb",
+      "resolved_path": null,
+      "resolved": "missing",
+      "kind": "volume"
+    }
+  ]
+}
+```
+
+**`resolved` states**
+
+| State | Meaning | `resolved_path` |
+|-------|---------|-----------------|
+| `ok` | The resolver found the file | absolute path |
+| `missing` | Authored, but nothing resolves — the usual sign of a broken path | `null` |
+| `udim` | A `<UDIM>` template. The resolver never expands the token, so this is **not** a missing file; the tiles are not checked individually. | `null` |
+| `uri` | A resolver scheme such as `omniverse://`, left to the resolver | `null` |
+| `expression` | An unexpanded expression variable, so not a path yet | `null` |
+
+**`kind` values**
+
+| Kind | What declares it |
+|------|------------------|
+| `texture` | An `inputs:*` attribute on a `UsdShade.Shader` |
+| `light` | Any asset attribute on a prim with `UsdLux.LightAPI` — a DomeLight HDRI is the common case |
+| `volume` | A `UsdVol.OpenVDBAsset` prim |
+| `other` | Any remaining asset-valued attribute |
+
+`asset_path` is always the string exactly as authored. Time-sampled attributes report one record per sample with the sample time in `frame`, because a cache sequence authors a different path per frame; `frame` is `null` for a default value. `asset_count` is the total found before `limit` was applied.
 
 ---
 

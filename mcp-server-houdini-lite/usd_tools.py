@@ -11,6 +11,9 @@ Read-only functions for inspecting USD files without loading geometry:
   read_cameras              — all Camera prims with lens/projection attributes
   read_prim_attributes      — attribute names/types/time-sample info on a prim
   read_attribute_value      — value of a single named attribute on a prim
+  read_asset_paths          — every asset-valued attribute on a composed stage
+                               (textures, light HDRIs, VDB caches), with the
+                               absolute path each one resolves to
 
 Write functions:
   write_layer_metadata           — partial update of layer metadata fields
@@ -24,7 +27,7 @@ Write functions:
 import re
 from pathlib import Path
 
-from pxr import Ar, Sdf, Tf, Usd, UsdGeom, Gf, Vt
+from pxr import Ar, Sdf, Tf, Usd, UsdGeom, UsdLux, UsdShade, UsdVol, Gf, Vt
 
 # Collect all Gf quaternion types (Quath was added in later USD versions)
 _GF_QUAT_TYPES = tuple(
@@ -658,6 +661,167 @@ def read_cameras(path: str, frame: float | None = None) -> dict:
         "frame":        frame,
         "camera_count": len(cameras),
         "cameras":      cameras,
+    }
+
+
+_ASSET_TYPES = frozenset({Sdf.ValueTypeNames.Asset, Sdf.ValueTypeNames.AssetArray})
+
+_UDIM_TOKEN = "<UDIM>"
+
+
+def _asset_kind(prim, attr_name: str) -> str:
+    """Label an asset attribute by what declares it.
+
+    The scan itself is by attribute type, so nothing asset-valued escapes it;
+    this only says what the path is for. A DomeLight is not a UsdShade.Shader,
+    so classifying by prim type alone — the obvious approach — would leave the
+    HDRI of a lighting scene out of the "texture" bucket entirely.
+    """
+    if UsdVol.OpenVDBAsset(prim):
+        return "volume"
+    if prim.HasAPI(UsdLux.LightAPI):
+        return "light"
+    if UsdShade.Shader(prim) and attr_name.startswith("inputs:"):
+        return "texture"
+    return "other"
+
+
+def _classify_asset(asset_path) -> tuple[str | None, str]:
+    """Turn one Sdf.AssetPath into (resolved_path, state).
+
+    resolvedPath is the composed stage's own answer, which is why it is used
+    here instead of the layer arithmetic read_composition_arcs performs: a
+    shader pulled in through a reference anchors against ITS layer, and
+    anchoring against the root would yield a confidently wrong path.
+
+    An empty resolvedPath is not automatically a missing file. The resolver
+    never expands <UDIM>, so a templated path always comes back empty and
+    calling that "missing" would condemn every UDIM texture in a production
+    look. Resolver URIs are likewise not this function's to answer.
+    """
+    authored = asset_path.path
+    resolved = asset_path.resolvedPath
+    if resolved:
+        return resolved.replace("\\", "/"), "ok"
+    if _UDIM_TOKEN in authored:
+        return None, "udim"
+    if _URI_SCHEME_RE.match(authored):
+        return None, "uri"
+    if "`" in authored or "${" in authored:
+        return None, "expression"
+    return None, "missing"
+
+
+def _asset_values(attr):
+    """Yield (frame, Sdf.AssetPath) for every value the attribute holds.
+
+    Time samples are walked rather than just the default value: a cache
+    sequence authors one path per frame, so reading only the default reports a
+    single file for a sequence of hundreds — or nothing at all.
+    """
+    times = attr.GetTimeSamples()
+    for frame in (times or [None]):
+        value = attr.Get() if frame is None else attr.Get(frame)
+        if value is None:
+            continue
+        if isinstance(value, Sdf.AssetPath):
+            yield frame, value
+            continue
+        try:
+            for item in value:
+                yield frame, item
+        except TypeError:
+            continue
+
+
+def read_asset_paths(
+    path: str,
+    prim_path: str = "/",
+    kind: str | None = None,
+    limit: int = 500,
+    load_payloads: bool = False,
+) -> dict:
+    """
+    Find every asset-valued attribute on a composed stage and report where
+    each one lands on disk.
+
+    This answers "which textures does this scene use, and are they there?" —
+    a question that otherwise needs one usd_read_prim_attributes plus one
+    usd_read_attribute_value per shader.
+
+    Args:
+        path          — absolute path to a USD file
+        prim_path     — subtree to walk; must be an absolute prim path
+        kind          — keep only records of this kind (see below)
+        limit         — cap on returned records; asset_count reports the true total
+        load_payloads — load payloads. Required when materials live inside one.
+
+    Returns a dict with keys:
+        path        — input file path
+        prim_path   — the subtree that was walked
+        asset_count — total records found, before `limit` was applied
+        truncated   — whether `limit` cut the list short
+        assets      — list of asset dicts (see below)
+
+    Each asset dict:
+        prim_path     — USD scene path of the prim holding the attribute
+        attribute     — attribute name, e.g. "inputs:file"
+        frame         — time sample the value came from, null for the default
+        asset_path    — the authored string, exactly as written
+        resolved_path — absolute path, or null when it cannot be resolved
+        resolved      — "ok" | "missing" | "udim" | "uri" | "expression"
+        kind          — "texture" | "light" | "volume" | "other"
+
+    Raises:
+        FileNotFoundError  — file does not exist
+        UsdOpenError       — stage could not be opened
+        ValueError         — prim_path is not absolute, or kind is unknown
+    """
+    _assert_exists(path)
+
+    if not Sdf.Path(prim_path).IsAbsolutePath():
+        raise ValueError(
+            f"prim_path must be an absolute USD path (e.g. '/mtl'), got: {prim_path!r}"
+        )
+    if kind is not None and kind not in ("texture", "light", "volume", "other"):
+        raise ValueError(
+            f"kind must be one of texture, light, volume, other — got: {kind!r}"
+        )
+
+    load = Usd.Stage.LoadAll if load_payloads else Usd.Stage.LoadNone
+    stage = _open_stage(path, load=load)
+
+    start = stage.GetPrimAtPath(prim_path)
+    if not start:
+        raise ValueError(f"prim not found: {prim_path}")
+
+    assets = []
+    for prim in Usd.PrimRange(start):
+        for attr in prim.GetAttributes():
+            if attr.GetTypeName() not in _ASSET_TYPES:
+                continue
+            attr_name = attr.GetName()
+            attr_kind = _asset_kind(prim, attr_name)
+            if kind is not None and attr_kind != kind:
+                continue
+            for frame, value in _asset_values(attr):
+                resolved_path, state = _classify_asset(value)
+                assets.append({
+                    "prim_path":     str(prim.GetPath()),
+                    "attribute":     attr_name,
+                    "frame":         frame,
+                    "asset_path":    value.path,
+                    "resolved_path": resolved_path,
+                    "resolved":      state,
+                    "kind":          attr_kind,
+                })
+
+    return {
+        "path":        path,
+        "prim_path":   prim_path,
+        "asset_count": len(assets),
+        "truncated":   len(assets) > limit,
+        "assets":      assets[:limit],
     }
 
 
