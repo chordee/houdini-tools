@@ -22,6 +22,7 @@ from usd_tools import (
     read_cameras,
     read_prim_attributes,
     read_asset_paths,
+    read_layer_dependencies,
     read_attribute_value,
     remove_sublayers,
     write_layer_metadata,
@@ -47,6 +48,7 @@ def register(mcp: MCPServer) -> None:
     mcp.tool()(usd_read_prim_attributes)
     mcp.tool()(usd_read_attribute_value)
     mcp.tool()(usd_read_asset_paths)
+    mcp.tool()(usd_read_layer_dependencies)
     mcp.tool()(usd_write_layer_metadata)
     mcp.tool()(usd_create_expressions_layer)
     mcp.tool()(usd_replace_anchors)
@@ -151,6 +153,17 @@ def usd_read_asset_paths(
     try:
         return read_asset_paths(path, prim_path=prim_path, kind=kind, limit=limit, load_payloads=load_payloads)
     except (FileNotFoundError, UsdOpenError, ValueError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_layer_dependencies(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    limit: Annotated[int, Field(ge=0, description="Maximum number of records to return (default 500)")] = 500,
+) -> dict:
+    """List every USD layer a scene depends on, following sublayers, references and payloads transitively. Use this to answer 'which files does this shot need' — for packaging, transfer, or auditing broken paths. Each record gives the absolute resolved_path, whether it could be opened, its depth, and introduced_by: the layer that declares it, which is where a broken path has to be fixed. Differs from usd_read_composition_arcs, which reads only what a single layer declares and keeps the authored strings that usd_replace_anchors matches on."""
+    try:
+        return read_layer_dependencies(path, limit=limit)
+    except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
 

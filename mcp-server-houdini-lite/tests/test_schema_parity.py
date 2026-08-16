@@ -23,6 +23,7 @@ CONVERTED: list[str] = [
 # could be added or dropped without any test noticing.
 ADDED: list[str] = [
     "usd_read_asset_paths",
+    "usd_read_layer_dependencies",
 ]
 
 

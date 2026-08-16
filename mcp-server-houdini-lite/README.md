@@ -681,6 +681,62 @@ Resolution goes through the composed stage, so a texture referenced from another
 | `other` | Any remaining asset-valued attribute |
 
 `asset_path` is always the string exactly as authored. Time-sampled attributes report one record per sample with the sample time in `frame`, because a cache sequence authors a different path per frame; `frame` is `null` for a default value. `asset_count` is the total found before `limit` was applied.
+---
+
+#### `usd_read_layer_dependencies`
+
+Follows sublayers, references and payloads **transitively** and lists every USD layer the scene needs. Use this for packaging, transfer, or auditing broken paths.
+
+**How this differs from `usd_read_composition_arcs`.** They overlap on the direct dependencies and neither replaces the other:
+
+| | `usd_read_composition_arcs` | `usd_read_layer_dependencies` |
+|---|---|---|
+| Depth | the given layer only | the whole tree |
+| Grouping | by arc type (sublayer / reference / payload) | one flat, de-duplicated list |
+| Paths | authored string **and** resolved path | resolved path only |
+| Use it for | rewriting anchors — the authored strings are what `usd_replace_anchors` matches on | collecting files — a layer reachable only through another layer appears only here |
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to a USD file |
+| `limit` | integer | no | Maximum records returned (default: `500`) |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/shots/sh010/shot.usda",
+  "dependency_count": 3,
+  "missing_count": 1,
+  "truncated": false,
+  "dependencies": [
+    {
+      "resolved_path": "/shots/sh010/layers/anim.usda",
+      "resolved": "ok",
+      "depth": 1,
+      "introduced_by": "/shots/sh010/shot.usda"
+    },
+    {
+      "resolved_path": "/assets/hero/hero.usda",
+      "resolved": "ok",
+      "depth": 2,
+      "introduced_by": "/shots/sh010/layers/anim.usda"
+    },
+    {
+      "resolved_path": "/assets/hero/groom_v3.usda",
+      "resolved": "missing",
+      "depth": 3,
+      "introduced_by": "/assets/hero/hero.usda"
+    }
+  ]
+}
+```
+
+`depth` is `1` for a direct dependency of `path`, and counts the shortest route to anything deeper. `introduced_by` names the layer that declares the dependency — for a `missing` entry that is the file you have to edit, which a flat list of paths cannot tell you.
+
+Cycles terminate: each layer is visited once, and the root never appears as its own dependency. Every path is reported with forward slashes, including on Windows — USD reports an opened layer's `realPath` and a computed path for one it could not open, and those two disagree on the separator.
 
 ---
 

@@ -11,6 +11,7 @@ Read-only functions for inspecting USD files without loading geometry:
   read_cameras              — all Camera prims with lens/projection attributes
   read_prim_attributes      — attribute names/types/time-sample info on a prim
   read_attribute_value      — value of a single named attribute on a prim
+  read_layer_dependencies   — every layer the scene needs, walked transitively
   read_asset_paths          — every asset-valued attribute on a composed stage
                                (textures, light HDRIs, VDB caches), with the
                                absolute path each one resolves to
@@ -822,6 +823,82 @@ def read_asset_paths(
         "asset_count": len(assets),
         "truncated":   len(assets) > limit,
         "assets":      assets[:limit],
+    }
+
+
+def read_layer_dependencies(path: str, limit: int = 500) -> dict:
+    """
+    Walk a layer's composition dependencies transitively and report every layer
+    the scene needs.
+
+    This is the "what files do I have to ship" question. read_composition_arcs
+    answers a different one — what a single layer declares, grouped by arc type
+    and keeping the authored string that replace_anchors matches on. The two
+    agree on the direct dependencies; only this one sees a layer reachable
+    solely through another layer.
+
+    Args:
+        path  — absolute path to a USD file
+        limit — cap on returned records; dependency_count reports the true total
+
+    Returns a dict with keys:
+        path             — input file path
+        dependency_count — total layers found, before `limit` was applied
+        missing_count    — how many of those could not be opened
+        truncated        — whether `limit` cut the list short
+        dependencies     — list of dependency dicts (see below)
+
+    Each dependency dict:
+        resolved_path — absolute path to the layer
+        resolved      — "ok" | "missing"
+        depth         — 1 for a direct dependency of `path`, 2 for its
+                        dependencies, and so on
+        introduced_by — absolute path of the layer that declares it, which is
+                        where a broken path has to be fixed
+
+    Raises:
+        FileNotFoundError — file does not exist
+        UsdOpenError      — file could not be opened as a USD layer
+    """
+    _assert_exists(path)
+    root = _open_layer(path)
+
+    def _norm(p: str) -> str:
+        # A layer USD opened reports realPath; one it could not reports the
+        # computed path. On Windows those disagree on the separator, so a
+        # caller comparing or joining them would silently mismatch.
+        return p.replace("\\", "/")
+
+    root_key = _norm(root.realPath or root.identifier)
+    visited = {root_key}
+    dependencies = []
+    queue = [(root, 1)]
+
+    while queue:
+        layer, depth = queue.pop(0)
+        introduced_by = _norm(layer.realPath or layer.identifier)
+        for dep in layer.GetCompositionAssetDependencies():
+            absolute = _norm(layer.ComputeAbsolutePath(dep))
+            sub = Sdf.Layer.FindOrOpen(absolute)
+            key = _norm(sub.realPath) if (sub is not None and sub.realPath) else absolute
+            if key in visited:
+                continue
+            visited.add(key)
+            dependencies.append({
+                "resolved_path": key,
+                "resolved":      "ok" if sub is not None else "missing",
+                "depth":         depth,
+                "introduced_by": introduced_by,
+            })
+            if sub is not None:
+                queue.append((sub, depth + 1))
+
+    return {
+        "path":             path,
+        "dependency_count": len(dependencies),
+        "missing_count":    sum(1 for d in dependencies if d["resolved"] == "missing"),
+        "truncated":        len(dependencies) > limit,
+        "dependencies":     dependencies[:limit],
     }
 
 
