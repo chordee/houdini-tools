@@ -601,6 +601,157 @@ Reads the value of a single named attribute on a USD prim. Stage is opened with 
 | `Sdf.AssetPath` | resolved path string |
 | `Sdf.ValueBlock` | `null` |
 | `Vt.Array` | list of elements (truncated to `max_elements`) |
+---
+
+#### `usd_read_asset_paths`
+
+Finds every file a USD scene points at — shader textures, light HDRIs, VDB caches — and reports whether each one is actually on disk. Use this to audit a scene for broken paths; the alternative is one `usd_read_prim_attributes` plus one `usd_read_attribute_value` per shader.
+
+The scan is by **attribute type**, not by prim type: any attribute typed `asset` or `asset[]` is reported. This matters because a `DomeLight` is not a `UsdShade.Shader`, so a shader-only walk would silently omit the HDRI of a lighting scene. Each record carries a `kind` so callers can narrow to just the textures.
+
+Resolution goes through the composed stage, so a texture referenced from another layer anchors against **that layer**, not the root — matching what a renderer will do.
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to a USD file |
+| `prim_path` | string | no | Absolute prim path to walk from (default: `/`, the whole stage) |
+| `kind` | string | no | Keep only `"texture"`, `"light"`, `"volume"` or `"other"`. Omit for all. |
+| `limit` | integer | no | Maximum records returned (default: `500`) |
+| `load_payloads` | boolean | no | Load USD payloads. Required when materials live inside a payload (default: `false`) |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/shots/sh010/look.usda",
+  "prim_path": "/",
+  "asset_count": 3,
+  "truncated": false,
+  "assets": [
+    {
+      "prim_path": "/mtl/surface/diffuse",
+      "attribute": "inputs:file",
+      "frame": null,
+      "asset_path": "./tex/albedo.<UDIM>.exr",
+      "resolved_path": null,
+      "resolved": "udim",
+      "kind": "texture"
+    },
+    {
+      "prim_path": "/lights/dome",
+      "attribute": "inputs:texture:file",
+      "frame": null,
+      "asset_path": "./hdri/studio.exr",
+      "resolved_path": "/shots/sh010/hdri/studio.exr",
+      "resolved": "ok",
+      "kind": "light"
+    },
+    {
+      "prim_path": "/vol/density",
+      "attribute": "filePath",
+      "frame": 1001.0,
+      "asset_path": "./cache/smoke.1001.vdb",
+      "resolved_path": null,
+      "resolved": "missing",
+      "kind": "volume"
+    }
+  ]
+}
+```
+
+**`resolved` states**
+
+| State | Meaning | `resolved_path` |
+|-------|---------|-----------------|
+| `ok` | The resolver found the file | absolute path |
+| `missing` | Authored, but nothing resolves — the usual sign of a broken path | `null` |
+| `udim` | A `<UDIM>` template. The resolver never expands the token, so this is **not** a missing file; the tiles are not checked individually. | `null` |
+| `uri` | A resolver scheme such as `omniverse://`, left to the resolver | `null` |
+| `expression` | An unexpanded expression variable, so not a path yet | `null` |
+
+**`kind` values**
+
+| Kind | What declares it |
+|------|------------------|
+| `texture` | An `inputs:*` attribute on a `UsdShade.Shader` |
+| `light` | Any asset attribute on a prim with `UsdLux.LightAPI` — a DomeLight HDRI is the common case |
+| `volume` | A `UsdVol.OpenVDBAsset` prim |
+| `other` | Any remaining asset-valued attribute |
+
+`asset_path` is always the string exactly as authored. `asset_count` is the total found before `limit` was applied.
+
+An attribute's default value and its time samples are both reported — one record each, with `frame` holding the sample time and `null` marking the default. A cache sequence authors a different path per frame, so reading only the default would report one file for a sequence of hundreds; and where an attribute carries both, the default is still an authored path whose file can be missing, even though the samples shadow it at every numeric time code.
+
+---
+
+#### `usd_read_layer_dependencies`
+
+Follows sublayers, references and payloads **transitively** and lists every USD layer the scene needs. Use this for packaging, transfer, or auditing broken paths.
+
+**How this differs from `usd_read_composition_arcs`.** They overlap on the direct dependencies and neither replaces the other:
+
+| | `usd_read_composition_arcs` | `usd_read_layer_dependencies` |
+|---|---|---|
+| Depth | the given layer only | the whole tree |
+| Grouping | by arc type (sublayer / reference / payload) | one flat, de-duplicated list |
+| Paths | authored string **and** resolved path, per arc | authored string **and** resolved path, per layer — `null` for a resolver URI |
+| Use it for | rewriting anchors — the authored strings are what `usd_replace_anchors` matches on | collecting files — a layer reachable only through another layer appears only here |
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to a USD file |
+| `limit` | integer | no | Maximum records returned (default: `500`) |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/shots/sh010/shot.usda",
+  "dependency_count": 3,
+  "missing_count": 1,
+  "truncated": false,
+  "dependencies": [
+    {
+      "asset_path": "./layers/anim.usda",
+      "resolved_path": "/shots/sh010/layers/anim.usda",
+      "resolved": "ok",
+      "depth": 1,
+      "introduced_by": "/shots/sh010/shot.usda"
+    },
+    {
+      "asset_path": "../../assets/hero/hero.usda",
+      "resolved_path": "/assets/hero/hero.usda",
+      "resolved": "ok",
+      "depth": 2,
+      "introduced_by": "/shots/sh010/layers/anim.usda"
+    },
+    {
+      "asset_path": "./groom_v3.usda",
+      "resolved_path": "/assets/hero/groom_v3.usda",
+      "resolved": "missing",
+      "depth": 3,
+      "introduced_by": "/assets/hero/hero.usda"
+    }
+  ]
+}
+```
+
+| `resolved` | Meaning | `resolved_path` |
+|------------|---------|-----------------|
+| `ok` | The layer opened | absolute path |
+| `missing` | Nothing at that location | absolute path, so you can see where it looked |
+| `uri` | A resolver scheme such as `omniverse://`, left to the resolver and not recursed into | `null` |
+| `expression` | An unexpanded expression variable, so not a path yet | `null` |
+
+`asset_path` is the string exactly as authored; `depth` is `1` for a direct dependency of `path` and counts the shortest route to anything deeper. `introduced_by` names the layer that declares the dependency — for a `missing` entry that is the file you have to edit, which a flat list of paths cannot tell you.
+
+A resolver URI is classified **before** any path arithmetic, and `missing_count` does not include one. `Sdf.Layer.ComputeAbsolutePath` rewrites `omniverse://server/a.usd` as `omniverse:/server/a.usd`, dropping a slash; reporting that would name a location the resolver never gave, and opening it fails, so the layer would also be blamed as missing.
+
+Cycles terminate: each layer is visited once, and the root never appears as its own dependency. Every path is reported with forward slashes, including on Windows — USD reports an opened layer's `realPath` and a computed path for one it could not open, and those two disagree on the separator.
 
 ---
 

@@ -14,13 +14,19 @@ BASELINE_PATH = Path(__file__).parent / "schema_baseline.json"
 with open(BASELINE_PATH, encoding="utf-8") as f:
     BASELINE_TOOL_NAMES = set(json.load(f).keys())
 
+# Tools added after the SDK v2 migration. The baseline is a snapshot of the
+# pre-migration server, so it can never contain them; listing them here keeps
+# the guard meaningful — an unlisted new tool, or a disappearing old one, still
+# fails — without pretending they were part of that snapshot.
+ADDED_TOOL_NAMES = {"usd_read_asset_paths", "usd_read_layer_dependencies"}
+
 
 @pytest.mark.anyio
 async def test_list_tools_exposes_every_declared_tool():
     async with Client(server.app) as client:
         result = await client.list_tools()
 
-    assert {t.name for t in result.tools} == BASELINE_TOOL_NAMES
+    assert {t.name for t in result.tools} == BASELINE_TOOL_NAMES | ADDED_TOOL_NAMES
 
 
 @pytest.mark.anyio

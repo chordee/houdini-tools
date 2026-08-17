@@ -21,6 +21,8 @@ from usd_tools import (
     replace_anchors,
     read_cameras,
     read_prim_attributes,
+    read_asset_paths,
+    read_layer_dependencies,
     read_attribute_value,
     remove_sublayers,
     write_layer_metadata,
@@ -45,6 +47,8 @@ def register(mcp: MCPServer) -> None:
     mcp.tool()(usd_read_cameras)
     mcp.tool()(usd_read_prim_attributes)
     mcp.tool()(usd_read_attribute_value)
+    mcp.tool()(usd_read_asset_paths)
+    mcp.tool()(usd_read_layer_dependencies)
     mcp.tool()(usd_write_layer_metadata)
     mcp.tool()(usd_create_expressions_layer)
     mcp.tool()(usd_replace_anchors)
@@ -134,6 +138,31 @@ def usd_read_attribute_value(
     """Read the value of a single named attribute on a USD prim. For array attributes, results are truncated to max_elements (default 100) to avoid large payloads; check array_total and array_truncated in the response."""
     try:
         return read_attribute_value(path, prim_path, attribute_name, frame=frame, max_elements=max_elements, load_payloads=load_payloads)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_asset_paths(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    prim_path: Annotated[str, Field(min_length=1, description="Absolute USD prim path to walk from (e.g. /mtl). Defaults to the whole stage.")] = "/",
+    kind: Annotated[Literal["texture", "light", "volume", "other"] | None, Field(description="Keep only assets of this kind. 'texture' = shader inputs; 'light' = light textures such as a DomeLight HDRI; 'volume' = VDB caches; 'other' = any remaining asset attribute. Omit for all.")] = None,
+    limit: Annotated[int, Field(ge=0, description="Maximum number of records to return (default 500)")] = 500,
+    load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the materials are defined inside a payload. Default: false.")] = False,
+) -> dict:
+    """Find every file a USD scene points at — textures, light HDRIs, VDB caches — and report whether each one is actually on disk. The stage is fully composed, so a texture referenced from another layer resolves against that layer, not the root. Each record carries the authored asset_path, the absolute resolved_path, a resolved state ('ok', 'missing', 'udim', 'uri', 'expression') and a kind. Use this to audit a scene for broken texture paths instead of reading attributes prim by prim."""
+    try:
+        return read_asset_paths(path, prim_path=prim_path, kind=kind, limit=limit, load_payloads=load_payloads)
+    except (FileNotFoundError, UsdOpenError, ValueError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_layer_dependencies(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    limit: Annotated[int, Field(ge=0, description="Maximum number of records to return (default 500)")] = 500,
+) -> dict:
+    """List every USD layer a scene depends on, following sublayers, references and payloads transitively. Use this to answer 'which files does this shot need' — for packaging, transfer, or auditing broken paths. Each record gives the authored asset_path, the absolute resolved_path, a resolved state ('ok', 'missing', 'uri', 'expression'), its depth, and introduced_by: the layer that declares it, which is where a broken path has to be fixed. A resolver URI or an unexpanded expression variable reports resolved_path null and is not recursed into. Differs from usd_read_composition_arcs, which reads only what a single layer declares, grouped by arc type."""
+    try:
+        return read_layer_dependencies(path, limit=limit)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 

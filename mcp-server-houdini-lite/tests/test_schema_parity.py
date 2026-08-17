@@ -17,6 +17,15 @@ CONVERTED: list[str] = [
     "usd_stitch_clips",
 ]
 
+# Tools written after the migration. They have no baseline entry to match —
+# the baseline is a snapshot of the pre-migration server — so they are exempt
+# from the schema comparison but must still be accounted for below, or a tool
+# could be added or dropped without any test noticing.
+ADDED: list[str] = [
+    "usd_read_asset_paths",
+    "usd_read_layer_dependencies",
+]
+
 
 def test_converted_names_exist_in_baseline():
     """A typo in CONVERTED should fail here, not as a KeyError deep in the parametrized test."""
@@ -50,7 +59,7 @@ async def test_converted_matches_server_exposed_tools():
         pytest.skip("server.app is not yet an MCPServer (pre-Task-2 state)")
 
     exposed = set((await capture_tools(server.app)).keys())
-    assert exposed == set(CONVERTED)
+    assert exposed == set(CONVERTED) | set(ADDED)
 
 
 # Numeric/array bound keys that must match the baseline exactly. minLength is
