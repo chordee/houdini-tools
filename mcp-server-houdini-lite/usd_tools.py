@@ -666,15 +666,16 @@ def read_cameras(path: str, frame: float | None = None) -> dict:
     }
 
 
-def _validate_limit(limit: int) -> None:
-    """A negative limit is a slice bound, not a cap.
+def _validate_limit(limit: int, name: str = "limit") -> None:
+    """A negative bound is a slice index, not a cap.
 
     The MCP schemas reject one, but these functions are also called directly,
-    and there `assets[:-1]` quietly drops the last record instead of failing —
-    a result indistinguishable from a genuine one.
+    and there `attrs[:-1]` quietly drops the last record instead of failing —
+    a result indistinguishable from a genuine one. Zero stays legal: asking for
+    none of them is coherent, and the truncation flags say so honestly.
     """
     if limit < 0:
-        raise ValueError(f"limit must be zero or greater, got: {limit}")
+        raise ValueError(f"{name} must be zero or greater, got: {limit}")
 
 
 _ASSET_TYPES = frozenset({Sdf.ValueTypeNames.Asset, Sdf.ValueTypeNames.AssetArray})
@@ -957,6 +958,7 @@ def read_prim_attributes(
     """List attributes on a prim with progressive disclosure via detail level."""
     if detail not in ("names", "types", "samples"):
         raise ValueError(f"detail must be 'names', 'types', or 'samples', got: {detail!r}")
+    _validate_limit(limit)
     if not prim_path:
         raise UsdOpenError("prim_path must not be empty")
     _assert_exists(path)
@@ -1027,6 +1029,7 @@ def read_attribute_value(
         raise UsdOpenError("prim_path must not be empty")
     if not attribute_name:
         raise UsdOpenError("attribute_name must not be empty")
+    _validate_limit(max_elements, "max_elements")
     _assert_exists(path)
     load = Usd.Stage.LoadAll if load_payloads else Usd.Stage.LoadNone
     stage = _open_stage(path, load=load)
