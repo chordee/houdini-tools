@@ -666,6 +666,17 @@ def read_cameras(path: str, frame: float | None = None) -> dict:
     }
 
 
+def _validate_limit(limit: int) -> None:
+    """A negative limit is a slice bound, not a cap.
+
+    The MCP schemas reject one, but these functions are also called directly,
+    and there `assets[:-1]` quietly drops the last record instead of failing —
+    a result indistinguishable from a genuine one.
+    """
+    if limit < 0:
+        raise ValueError(f"limit must be zero or greater, got: {limit}")
+
+
 _ASSET_TYPES = frozenset({Sdf.ValueTypeNames.Asset, Sdf.ValueTypeNames.AssetArray})
 
 _UDIM_TOKEN = "<UDIM>"
@@ -789,6 +800,7 @@ def read_asset_paths(
         ValueError         — prim_path is not absolute, or kind is unknown
     """
     _assert_exists(path)
+    _validate_limit(limit)
 
     if not Sdf.Path(prim_path).IsAbsolutePath():
         raise ValueError(
@@ -871,6 +883,7 @@ def read_layer_dependencies(path: str, limit: int = 500) -> dict:
         UsdOpenError      — file could not be opened as a USD layer
     """
     _assert_exists(path)
+    _validate_limit(limit)
     root = _open_layer(path)
 
     def _norm(p: str) -> str:
@@ -888,6 +901,25 @@ def read_layer_dependencies(path: str, limit: int = 500) -> dict:
         layer, depth = queue.popleft()
         introduced_by = _norm(layer.realPath or layer.identifier)
         for dep in layer.GetCompositionAssetDependencies():
+            # Classify before doing any path arithmetic. ComputeAbsolutePath
+            # rewrites "omniverse://server/a.usd" as "omniverse:/server/a.usd",
+            # losing a slash — reporting that as a resolved path would invent a
+            # location the resolver never named, and opening it fails, so the
+            # layer would also be blamed as missing.
+            if _URI_SCHEME_RE.match(dep) or "`" in dep or "${" in dep:
+                state = "uri" if _URI_SCHEME_RE.match(dep) else "expression"
+                if dep in visited:
+                    continue
+                visited.add(dep)
+                dependencies.append({
+                    "asset_path":    dep,
+                    "resolved_path": None,
+                    "resolved":      state,
+                    "depth":         depth,
+                    "introduced_by": introduced_by,
+                })
+                continue
+
             absolute = _norm(layer.ComputeAbsolutePath(dep))
             sub = Sdf.Layer.FindOrOpen(absolute)
             key = _norm(sub.realPath) if (sub is not None and sub.realPath) else absolute
@@ -895,6 +927,7 @@ def read_layer_dependencies(path: str, limit: int = 500) -> dict:
                 continue
             visited.add(key)
             dependencies.append({
+                "asset_path":    dep,
                 "resolved_path": key,
                 "resolved":      "ok" if sub is not None else "missing",
                 "depth":         depth,

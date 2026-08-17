@@ -10,6 +10,8 @@ Each record says which layer introduced it, because when a dependency is
 missing, the layer that declares it is the thing you have to go and fix.
 """
 
+import json
+
 import pytest
 from pxr import Usd
 
@@ -131,3 +133,65 @@ def test_the_result_is_capped_and_says_so(tmp_path):
 def test_a_missing_root_is_rejected(tmp_path):
     with pytest.raises(FileNotFoundError):
         read_layer_dependencies(str(tmp_path / "nope.usda"))
+
+
+def test_a_resolver_uri_is_not_run_through_path_arithmetic(tmp_path):
+    """ComputeAbsolutePath eats one slash of omniverse:// and yields a broken
+    string. Reporting that as a resolved path — and the layer as missing —
+    invents a location the resolver never named."""
+    root = _layer(tmp_path / "root.usda", sublayers=["omniverse://server/asset.usd"])
+
+    entry = read_layer_dependencies(str(root))["dependencies"][0]
+
+    assert entry["resolved"] == "uri"
+    assert entry["resolved_path"] is None
+    assert entry["asset_path"] == "omniverse://server/asset.usd"
+
+
+def test_no_mangled_uri_reaches_the_output(tmp_path):
+    """The specific corruption, asserted directly: // must never become /."""
+    root = _layer(
+        tmp_path / "root.usda",
+        sublayers=["omniverse://server/a.usd", "asset:lib/model.usda"],
+    )
+
+    result = read_layer_dependencies(str(root))
+
+    assert "omniverse:/server" not in json.dumps(result)
+    assert {d["resolved"] for d in result["dependencies"]} == {"uri"}
+
+
+def test_a_uri_is_not_counted_as_a_missing_file(tmp_path):
+    """missing_count drives "is this scene complete"; a URI is not breakage."""
+    root = _layer(tmp_path / "root.usda", sublayers=["omniverse://server/a.usd"])
+
+    assert read_layer_dependencies(str(root))["missing_count"] == 0
+
+
+def test_an_unexpanded_expression_variable_is_not_a_path(tmp_path):
+    root = _layer(tmp_path / "root.usda", sublayers=["`${SHOT}`/layer.usda"])
+
+    entry = read_layer_dependencies(str(root))["dependencies"][0]
+
+    assert entry["resolved"] == "expression"
+    assert entry["resolved_path"] is None
+
+
+def test_the_authored_string_is_kept_for_a_resolved_layer_too(tmp_path):
+    """Knowing what was written is what lets a caller go and fix it."""
+    _layer(tmp_path / "mid.usda")
+    root = _layer(tmp_path / "root.usda", sublayers=["./mid.usda"])
+
+    entry = read_layer_dependencies(str(root))["dependencies"][0]
+
+    assert entry["asset_path"] == "./mid.usda"
+    assert entry["resolved"] == "ok"
+
+
+def test_a_negative_limit_is_rejected(tmp_path):
+    """The MCP schema stops this, but a direct caller bypasses the schema, and
+    a negative slice bound silently drops a suffix instead of capping."""
+    root = _layer(tmp_path / "root.usda")
+
+    with pytest.raises(ValueError, match="limit"):
+        read_layer_dependencies(str(root), limit=-1)

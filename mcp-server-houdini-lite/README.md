@@ -716,18 +716,21 @@ Follows sublayers, references and payloads **transitively** and lists every USD 
   "truncated": false,
   "dependencies": [
     {
+      "asset_path": "./layers/anim.usda",
       "resolved_path": "/shots/sh010/layers/anim.usda",
       "resolved": "ok",
       "depth": 1,
       "introduced_by": "/shots/sh010/shot.usda"
     },
     {
+      "asset_path": "../../assets/hero/hero.usda",
       "resolved_path": "/assets/hero/hero.usda",
       "resolved": "ok",
       "depth": 2,
       "introduced_by": "/shots/sh010/layers/anim.usda"
     },
     {
+      "asset_path": "./groom_v3.usda",
       "resolved_path": "/assets/hero/groom_v3.usda",
       "resolved": "missing",
       "depth": 3,
@@ -737,7 +740,16 @@ Follows sublayers, references and payloads **transitively** and lists every USD 
 }
 ```
 
-`depth` is `1` for a direct dependency of `path`, and counts the shortest route to anything deeper. `introduced_by` names the layer that declares the dependency — for a `missing` entry that is the file you have to edit, which a flat list of paths cannot tell you.
+| `resolved` | Meaning | `resolved_path` |
+|------------|---------|-----------------|
+| `ok` | The layer opened | absolute path |
+| `missing` | Nothing at that location | absolute path, so you can see where it looked |
+| `uri` | A resolver scheme such as `omniverse://`, left to the resolver and not recursed into | `null` |
+| `expression` | An unexpanded expression variable, so not a path yet | `null` |
+
+`asset_path` is the string exactly as authored; `depth` is `1` for a direct dependency of `path` and counts the shortest route to anything deeper. `introduced_by` names the layer that declares the dependency — for a `missing` entry that is the file you have to edit, which a flat list of paths cannot tell you.
+
+A resolver URI is classified **before** any path arithmetic, and `missing_count` does not include one. `Sdf.Layer.ComputeAbsolutePath` rewrites `omniverse://server/a.usd` as `omniverse:/server/a.usd`, dropping a slash; reporting that would name a location the resolver never gave, and opening it fails, so the layer would also be blamed as missing.
 
 Cycles terminate: each layer is visited once, and the root never appears as its own dependency. Every path is reported with forward slashes, including on Windows — USD reports an opened layer's `realPath` and a computed path for one it could not open, and those two disagree on the separator.
 
