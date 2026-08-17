@@ -696,7 +696,7 @@ Follows sublayers, references and payloads **transitively** and lists every USD 
 |---|---|---|
 | Depth | the given layer only | the whole tree |
 | Grouping | by arc type (sublayer / reference / payload) | one flat, de-duplicated list |
-| Paths | authored string **and** resolved path | resolved path only |
+| Paths | authored string **and** resolved path, per arc | authored string **and** resolved path, per layer — `null` for a resolver URI |
 | Use it for | rewriting anchors — the authored strings are what `usd_replace_anchors` matches on | collecting files — a layer reachable only through another layer appears only here |
 
 **Input**

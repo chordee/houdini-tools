@@ -222,6 +222,45 @@ def test_a_pure_sequence_gains_no_phantom_default_record(tmp_path):
     assert frames == [1.0], "a default record would appear here as None"
 
 
+def test_an_empty_asset_value_is_not_a_missing_file(tmp_path):
+    """USD writes a blank asset as @@ — the absence of a reference, not a broken one.
+
+    Classifying it by the same rules as a real path makes it "missing", which
+    invents breakage and inflates asset_count, the number a caller reads to
+    decide whether a scene is complete.
+    """
+
+    def build(stage):
+        UsdShade.Shader.Define(stage, "/mtl/tex").CreateInput(
+            "file", Sdf.ValueTypeNames.Asset
+        ).Set(Sdf.AssetPath(""))
+
+    path = _stage_with(tmp_path, build)
+
+    result = read_asset_paths(path)
+
+    assert result["assets"] == []
+    assert result["asset_count"] == 0
+
+
+def test_an_empty_element_does_not_displace_the_real_ones(tmp_path):
+    """A blank slot in an array must vanish without taking its neighbours."""
+
+    def build(stage):
+        UsdShade.Shader.Define(stage, "/mtl/tex").CreateInput(
+            "files", Sdf.ValueTypeNames.AssetArray
+        ).Set([Sdf.AssetPath("./tex/a.png"), Sdf.AssetPath(""), Sdf.AssetPath("./tex/b.png")])
+
+    _touch(tmp_path, "tex", "a.png")
+    _touch(tmp_path, "tex", "b.png")
+    path = _stage_with(tmp_path, build)
+
+    result = read_asset_paths(path)
+
+    assert [a["asset_path"] for a in result["assets"]] == ["./tex/a.png", "./tex/b.png"]
+    assert result["asset_count"] == 2
+
+
 def test_each_element_of_an_asset_array_gets_its_own_record(tmp_path):
     def build(stage):
         shader = UsdShade.Shader.Define(stage, "/mtl/tex")

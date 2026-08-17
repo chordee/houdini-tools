@@ -741,14 +741,19 @@ def _asset_values(attr):
     unconditionally adds no phantom record to a pure sequence.
     """
     def _each(frame, value):
+        # An authored blank asset — USD writes it as @@ — is the absence of a
+        # reference, not a broken one. Classifying it like a real path makes it
+        # "missing", inventing breakage and inflating asset_count.
         if value is None:
             return
         if isinstance(value, Sdf.AssetPath):
-            yield frame, value
+            if value.path:
+                yield frame, value
             return
         try:
             for item in value:
-                yield frame, item
+                if item and item.path:
+                    yield frame, item
         except TypeError:
             return
 
@@ -872,8 +877,13 @@ def read_layer_dependencies(path: str, limit: int = 500) -> dict:
         dependencies     — list of dependency dicts (see below)
 
     Each dependency dict:
-        resolved_path — absolute path to the layer
-        resolved      — "ok" | "missing"
+        asset_path    — the authored string, exactly as written
+        resolved_path — absolute path to the layer, or null when the authored
+                        string is not a filesystem path
+        resolved      — "ok"         layer opened
+                        "missing"    nothing at that location
+                        "uri"        a resolver scheme; not recursed into
+                        "expression" an unexpanded expression variable
         depth         — 1 for a direct dependency of `path`, 2 for its
                         dependencies, and so on
         introduced_by — absolute path of the layer that declares it, which is

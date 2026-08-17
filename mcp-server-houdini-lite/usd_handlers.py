@@ -160,7 +160,7 @@ def usd_read_layer_dependencies(
     path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
     limit: Annotated[int, Field(ge=0, description="Maximum number of records to return (default 500)")] = 500,
 ) -> dict:
-    """List every USD layer a scene depends on, following sublayers, references and payloads transitively. Use this to answer 'which files does this shot need' — for packaging, transfer, or auditing broken paths. Each record gives the absolute resolved_path, whether it could be opened, its depth, and introduced_by: the layer that declares it, which is where a broken path has to be fixed. Differs from usd_read_composition_arcs, which reads only what a single layer declares and keeps the authored strings that usd_replace_anchors matches on."""
+    """List every USD layer a scene depends on, following sublayers, references and payloads transitively. Use this to answer 'which files does this shot need' — for packaging, transfer, or auditing broken paths. Each record gives the authored asset_path, the absolute resolved_path, a resolved state ('ok', 'missing', 'uri', 'expression'), its depth, and introduced_by: the layer that declares it, which is where a broken path has to be fixed. A resolver URI or an unexpanded expression variable reports resolved_path null and is not recursed into. Differs from usd_read_composition_arcs, which reads only what a single layer declares, grouped by arc type."""
     try:
         return read_layer_dependencies(path, limit=limit)
     except (FileNotFoundError, UsdOpenError) as e:
