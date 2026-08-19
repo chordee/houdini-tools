@@ -830,8 +830,9 @@ def read_render_settings(path: str, load_payloads: bool = False) -> dict:
         camera                 — first target of the camera relationship, or null
         attributes             — name -> {value, source}, see below
         products               — list of product dicts
-        missing_product_targets — targets of the products relationship that name
-                                 a prim that is not on the stage
+        missing_product_targets — targets of the products relationship that could
+                                 not be used: either no prim is there, or the
+                                 prim is not a RenderProduct
 
     Each product dict:
         prim_path, product_name, product_type
@@ -840,7 +841,9 @@ def read_render_settings(path: str, load_payloads: bool = False) -> dict:
         attributes             — name -> {value, source}
         vars                   — ordered RenderVar dicts (prim_path, data_type,
                                  source_name, source_type)
-        missing_var_targets    — orderedVars targets that are not on the stage
+        missing_var_targets    — orderedVars targets that could not be used:
+                                 either no prim is there, or it is not a
+                                 RenderVar
 
     Array values are reported as {"_array_total": n, "_truncated": bool,
     "values": [...]}, capped at RENDER_MAX_ARRAY_ELEMENTS.
