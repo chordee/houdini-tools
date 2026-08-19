@@ -20,7 +20,8 @@ from mcp.client.client import Client
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdRender
 
 import server
-from usd_tools import read_render_settings
+import usd_tools
+from usd_tools import RENDER_MAX_ARRAY_ELEMENTS, UsdOpenError, read_render_settings
 
 FALLBACK_RESOLUTION = [2048, 1080]
 
@@ -276,3 +277,92 @@ async def test_the_tool_reports_the_inherited_resolution_over_mcp(tmp_path):
         "value": [1920, 1080],
         "source": "inherited",
     }
+
+
+def test_a_products_target_that_is_not_a_product_is_reported_as_missing(tmp_path):
+    """A relationship can name any prim. Reading a Mesh as a product yields a
+    record with no attributes and a made-up identity, which is worse than
+    saying the target could not be used."""
+
+    def build(stage):
+        UsdGeom.Mesh.Define(stage, "/geo/notaproduct")
+        rs = UsdRender.Settings.Define(stage, "/Render/rs")
+        rs.CreateProductsRel().SetTargets(["/geo/notaproduct"])
+
+    path = _stage(tmp_path, build)
+
+    entry = _only(read_render_settings(path))
+
+    assert entry["products"] == []
+    assert entry["missing_product_targets"] == ["/geo/notaproduct"]
+
+
+def test_a_var_target_that_is_not_a_var_is_reported_as_missing(tmp_path):
+    def build(stage):
+        UsdGeom.Mesh.Define(stage, "/geo/notavar")
+        pr = _product(stage, "/Render/Products/beauty")
+        pr.CreateOrderedVarsRel().SetTargets(["/geo/notavar"])
+        _settings(stage, "/Render/rs", products=[pr.GetPath()])
+
+    path = _stage(tmp_path, build)
+
+    product = _only(read_render_settings(path))["products"][0]
+
+    assert product["vars"] == []
+    assert product["missing_var_targets"] == ["/geo/notavar"]
+
+
+def test_render_prims_inside_a_payload_need_load_payloads(tmp_path):
+    """Without it the answer is an empty list, indistinguishable from a scene
+    that has no render settings at all."""
+    inner = tmp_path / "inner.usda"
+    inner_stage = Usd.Stage.CreateNew(str(inner))
+    UsdRender.Settings.Define(inner_stage, "/Render/rs")
+    inner_stage.SetDefaultPrim(inner_stage.GetPrimAtPath("/Render"))
+    inner_stage.GetRootLayer().Save()
+
+    def build(stage):
+        stage.DefinePrim("/World").GetPayloads().AddPayload("./inner.usda")
+
+    path = _stage(tmp_path, build)
+
+    assert read_render_settings(path)["render_settings"] == []
+
+    loaded = read_render_settings(path, load_payloads=True)
+    assert [s["prim_path"] for s in loaded["render_settings"]] == ["/World/rs"]
+
+
+def test_a_long_array_attribute_is_capped(tmp_path):
+    """An authored array goes straight into the MCP response; unbounded, a big
+    one would dominate it."""
+
+    def build(stage):
+        rs = _settings(stage, "/Render/rs")
+        rs.GetPrim().CreateAttribute(
+            "karma:global:manylayers", Sdf.ValueTypeNames.IntArray
+        ).Set(list(range(500)))
+
+    path = _stage(tmp_path, build)
+
+    value = _only(read_render_settings(path))["attributes"]["karma:global:manylayers"]["value"]
+
+    assert len(value["values"]) == RENDER_MAX_ARRAY_ELEMENTS
+    assert value["_array_total"] == 500, "the true length is still reported"
+    assert value["_truncated"] is True
+    assert value["values"][0] == 0, "the cap keeps the front of the array"
+
+
+def test_a_missing_render_schema_is_reported_as_a_usd_error(tmp_path):
+    """A USD build without the render schemas would otherwise raise
+    AttributeError from deep inside, which the handler does not translate."""
+
+    class _EmptyRegistry:
+        def FindConcretePrimDefinition(self, name):
+            return None
+
+    path = _stage(tmp_path, lambda s: _settings(s, "/Render/rs"))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(usd_tools.Usd, "SchemaRegistry", _EmptyRegistry)
+        with pytest.raises(UsdOpenError, match="render schema"):
+            read_render_settings(path)

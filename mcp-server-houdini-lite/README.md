@@ -774,6 +774,7 @@ A number that looks like a real setting and is not one. Each attribute therefore
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | yes | Absolute path to a USD file |
+| `load_payloads` | boolean | no | Load USD payloads. Required when the render prims live inside one (default: `false`) |
 
 **Output** (JSON)
 
@@ -824,7 +825,13 @@ A number that looks like a real setting and is not one. Each attribute therefore
 
 **Which attributes appear.** The attributes a product inherits — everything `RenderSettings` and `RenderProduct` have in common — are always present, because their fallbacks are what the renderer will use. Everything else appears only when authored, which surfaces renderer-specific settings without padding the result with defaults nobody set. The inheritable set is derived from the schema at runtime rather than hardcoded, so it stays correct across USD releases.
 
+Prims are matched by schema type rather than by an exact type name, so a renderer shipping its own type derived from `RenderSettings` or `RenderProduct` is still found. A relationship target that names a prim which is not the expected type is reported in `missing_product_targets` / `missing_var_targets` rather than read as one.
+
 **Nesting, and products nothing targets.** Products are listed under the settings that target them. This is not presentation: a product's unauthored values come from the settings, so a product targeted by two settings prims genuinely has two resolutions and appears under each with the right one — a flat list would have to discard a correct answer. A product no settings targets is listed in `orphan_products`, where every unauthored value reports `fallback` because there is nothing to inherit from. Such products are found by prim type, so they cannot be missed by following relationships alone.
+
+**Payloads are not loaded by default.** Render prims defined inside a payload are simply absent from the result, which is indistinguishable from a scene that declares no render settings — set `load_payloads` when the render prims may live inside one.
+
+Array values are reported as `{"_array_total": n, "_truncated": bool, "values": [...]}`, capped at 100 elements so one long authored array cannot dominate the response.
 
 `default_render_settings_prim` is the stage's `renderSettingsPrimPath` metadata — which settings a render uses by default — and is `null` when unauthored rather than guessed. Relationship targets naming a prim that is not on the stage are reported in `missing_product_targets` / `missing_var_targets` instead of being silently dropped.
 

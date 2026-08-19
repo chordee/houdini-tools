@@ -31,7 +31,7 @@ import re
 from collections import deque
 from pathlib import Path
 
-from pxr import Ar, Sdf, Tf, Usd, UsdGeom, UsdLux, UsdShade, UsdVol, Gf, Vt
+from pxr import Ar, Sdf, Tf, Usd, UsdGeom, UsdLux, UsdRender, UsdShade, UsdVol, Gf, Vt
 
 # Collect all Gf quaternion types (Quath was added in later USD versions)
 _GF_QUAT_TYPES = tuple(
@@ -668,6 +668,13 @@ def read_cameras(path: str, frame: float | None = None) -> dict:
     }
 
 
+# Authored arrays go straight into the MCP response. Render attributes are
+# normally short — includedPurposes and the like — but nothing stops a scene
+# from authoring a long one, so the serialized value is capped the way
+# read_attribute_value caps its own.
+RENDER_MAX_ARRAY_ELEMENTS = 100
+
+
 def _render_base_attribute_names() -> tuple[str, ...]:
     """The attributes a RenderProduct takes from the RenderSettings targeting it.
 
@@ -677,9 +684,21 @@ def _render_base_attribute_names() -> tuple[str, ...]:
     relationship needs its targets resolved, not its value read.
     """
     registry = Usd.SchemaRegistry()
-    settings = set(registry.FindConcretePrimDefinition("RenderSettings").GetPropertyNames())
-    product = set(registry.FindConcretePrimDefinition("RenderProduct").GetPropertyNames())
-    return tuple(sorted((settings & product) - {"camera"}))
+    settings = registry.FindConcretePrimDefinition("RenderSettings")
+    product = registry.FindConcretePrimDefinition("RenderProduct")
+    if settings is None or product is None:
+        # A USD build without the render schema. Returning an empty set instead
+        # would drop the inheritable attributes and read as "nothing was set".
+        raise UsdOpenError(
+            "this USD build does not provide the render schema "
+            "(RenderSettings / RenderProduct); cannot read render settings"
+        )
+    return tuple(sorted((set(settings.GetPropertyNames())
+                         & set(product.GetPropertyNames())) - {"camera"}))
+
+
+def _serialize_render_value(value):
+    return _value_to_json(value, max_elements=RENDER_MAX_ARRAY_ELEMENTS)
 
 
 def _attribute_record(prim, name: str, inherit_from=None) -> dict | None:
@@ -693,14 +712,14 @@ def _attribute_record(prim, name: str, inherit_from=None) -> dict | None:
     """
     attr = prim.GetAttribute(name)
     if attr and attr.HasAuthoredValue():
-        return {"value": _value_to_json(attr.Get()), "source": "authored"}
+        return {"value": _serialize_render_value(attr.Get()), "source": "authored"}
     if inherit_from is not None:
         parent = inherit_from.GetAttribute(name)
         if parent and parent.HasAuthoredValue():
-            return {"value": _value_to_json(parent.Get()), "source": "inherited"}
+            return {"value": _serialize_render_value(parent.Get()), "source": "inherited"}
     if not attr:
         return None
-    return {"value": _value_to_json(attr.Get()), "source": "fallback"}
+    return {"value": _serialize_render_value(attr.Get()), "source": "fallback"}
 
 
 def _render_attributes(prim, base_names: tuple[str, ...], inherit_from=None) -> dict:
@@ -722,7 +741,7 @@ def _render_attributes(prim, base_names: tuple[str, ...], inherit_from=None) -> 
         name = attr.GetName()
         if name in attributes or not attr.HasAuthoredValue():
             continue
-        attributes[name] = {"value": _value_to_json(attr.Get()), "source": "authored"}
+        attributes[name] = {"value": _serialize_render_value(attr.Get()), "source": "authored"}
     return attributes
 
 
@@ -758,9 +777,12 @@ def _read_render_product(stage, prim, base_names, inherit_from=None) -> dict:
     rel = prim.GetRelationship("orderedVars")
     for target in (rel.GetTargets() if rel else []):
         var_prim = stage.GetPrimAtPath(target)
-        if var_prim:
+        if var_prim and var_prim.IsA(UsdRender.Var):
             variables.append(_read_render_var(var_prim))
         else:
+            # A relationship can name any prim. Reading a non-Var as one yields
+            # a record of empty fields under a borrowed identity, which hides
+            # the mistake instead of reporting it.
             missing_vars.append(str(target))
 
     product_name = prim.GetAttribute("productName")
@@ -777,7 +799,7 @@ def _read_render_product(stage, prim, base_names, inherit_from=None) -> dict:
     }
 
 
-def read_render_settings(path: str) -> dict:
+def read_render_settings(path: str, load_payloads: bool = False) -> dict:
     """
     Find the RenderSettings and RenderProduct prims on a stage and report what
     a render driven by each would actually use.
@@ -789,7 +811,11 @@ def read_render_settings(path: str) -> dict:
     settings targets are listed separately, since they have nothing to inherit.
 
     Args:
-        path — absolute path to a USD file
+        path          — absolute path to a USD file
+        load_payloads — load USD payloads. Required when the render prims are
+                        defined inside one: without it they are simply absent,
+                        and an empty result is indistinguishable from a scene
+                        that declares no render settings at all.
 
     Returns a dict with keys:
         path                          — input file path
@@ -816,6 +842,9 @@ def read_render_settings(path: str) -> dict:
                                  source_name, source_type)
         missing_var_targets    — orderedVars targets that are not on the stage
 
+    Array values are reported as {"_array_total": n, "_truncated": bool,
+    "values": [...]}, capped at RENDER_MAX_ARRAY_ELEMENTS.
+
     `source` is one of:
         authored  — set on this prim
         inherited — set on the RenderSettings that targets this product
@@ -826,16 +855,18 @@ def read_render_settings(path: str) -> dict:
         UsdOpenError       — stage could not be opened
     """
     _assert_exists(path)
-    stage = _open_stage(path, load=Usd.Stage.LoadNone)
+    load = Usd.Stage.LoadAll if load_payloads else Usd.Stage.LoadNone
+    stage = _open_stage(path, load=load)
     base_names = _render_base_attribute_names()
 
     settings_prims = []
     product_prims = {}
     for prim in stage.TraverseAll():
-        type_name = prim.GetTypeName()
-        if type_name == "RenderSettings":
+        # IsA rather than an exact type-name match, so a schema derived from
+        # these — a renderer shipping its own settings type — is still found.
+        if prim.IsA(UsdRender.Settings):
             settings_prims.append(prim)
-        elif type_name == "RenderProduct":
+        elif prim.IsA(UsdRender.Product):
             product_prims[str(prim.GetPath())] = prim
 
     claimed = set()
@@ -845,8 +876,8 @@ def read_render_settings(path: str) -> dict:
         rel = prim.GetRelationship("products")
         for target in (rel.GetTargets() if rel else []):
             key = str(target)
-            product_prim = product_prims.get(key) or stage.GetPrimAtPath(target)
-            if not product_prim:
+            product_prim = product_prims.get(key)
+            if product_prim is None:
                 missing.append(key)
                 continue
             claimed.add(key)
