@@ -1,6 +1,6 @@
 [project]
 name = "houdini-lite"
-version = "0.4.0"
+version = "0.4.1"
 description = "MCP server for Houdini pipeline tools"
 requires-python = ">=3.11"
 dependencies = [
