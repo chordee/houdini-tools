@@ -755,6 +755,88 @@ Cycles terminate: each layer is visited once, and the root never appears as its 
 
 ---
 
+#### `usd_read_render_settings`
+
+Finds the `RenderSettings` and `RenderProduct` prims in a scene and reports what a render driven by each would actually use — resolution, camera, output paths, AOVs, and whatever renderer-specific settings the scene authored (`karma:global:*` and friends).
+
+**Why every value carries a source.** USD does not resolve render inheritance for you. A `RenderProduct` that does not author its own resolution returns the *schema fallback* of `2048x1080`, not the resolution of the `RenderSettings` that targets it:
+
+```python
+product.GetResolutionAttr().Get()          # (2048, 1080)  -- the fallback
+product.GetResolutionAttr().HasAuthoredValue()  # False
+settings.GetResolutionAttr().Get()         # (1920, 1080)  -- what actually renders
+```
+
+A number that looks like a real setting and is not one. Each attribute therefore reports `authored`, `inherited` or `fallback`.
+
+**Input**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Absolute path to a USD file |
+| `load_payloads` | boolean | no | Load USD payloads. Required when the render prims live inside one (default: `false`) |
+
+**Output** (JSON)
+
+```json
+{
+  "path": "/shots/sh010/shot.usda",
+  "default_render_settings_prim": "/Render/rendersettings",
+  "render_settings": [
+    {
+      "prim_path": "/Render/rendersettings",
+      "camera": "/cameras/shotcam",
+      "attributes": {
+        "resolution": { "value": [1920, 1080], "source": "authored" },
+        "pixelAspectRatio": { "value": 1.0, "source": "fallback" },
+        "karma:global:samplesperpixel": { "value": 9, "source": "authored" }
+      },
+      "products": [
+        {
+          "prim_path": "/Render/Products/beauty",
+          "product_name": "render/beauty.exr",
+          "product_type": "raster",
+          "camera": "/cameras/shotcam",
+          "camera_source": "inherited",
+          "attributes": {
+            "resolution": { "value": [1920, 1080], "source": "inherited" }
+          },
+          "vars": [
+            { "prim_path": "/Render/Vars/Ci", "data_type": "color3f",
+              "source_name": "Ci", "source_type": "raw" }
+          ],
+          "missing_var_targets": []
+        }
+      ],
+      "missing_product_targets": []
+    }
+  ],
+  "orphan_products": []
+}
+```
+
+**`source` values**
+
+| Source | Meaning |
+|--------|---------|
+| `authored` | Set on this prim |
+| `inherited` | Not set here; taken from the `RenderSettings` that targets this product |
+| `fallback` | Set nowhere — this is the schema default, not scene data |
+
+**Which attributes appear.** The attributes a product inherits — everything `RenderSettings` and `RenderProduct` have in common — are always present, because their fallbacks are what the renderer will use. Everything else appears only when authored, which surfaces renderer-specific settings without padding the result with defaults nobody set. The inheritable set is derived from the schema at runtime rather than hardcoded, so it stays correct across USD releases.
+
+Prims are matched by schema type rather than by an exact type name, so a renderer shipping its own type derived from `RenderSettings` or `RenderProduct` is still found. A relationship target that cannot be used — either no prim is there, or the prim is not a `RenderProduct` / `RenderVar` — is reported in `missing_product_targets` / `missing_var_targets` rather than read as one or silently dropped.
+
+**Nesting, and products nothing targets.** Products are listed under the settings that target them. This is not presentation: a product's unauthored values come from the settings, so a product targeted by two settings prims genuinely has two resolutions and appears under each with the right one — a flat list would have to discard a correct answer. A product no settings targets is listed in `orphan_products`, where every unauthored value reports `fallback` because there is nothing to inherit from. Such products are found by prim type, so they cannot be missed by following relationships alone.
+
+**Payloads are not loaded by default.** Render prims defined inside a payload are simply absent from the result, which is indistinguishable from a scene that declares no render settings — set `load_payloads` when the render prims may live inside one.
+
+Array values are reported as `{"_array_total": n, "_truncated": bool, "values": [...]}`, capped at 100 elements so one long authored array cannot dominate the response.
+
+`default_render_settings_prim` is the stage's `renderSettingsPrimPath` metadata — which settings a render uses by default — and is `null` when unauthored rather than guessed.
+
+---
+
 #### `usd_replace_anchors`
 
 Replaces multiple anchor asset paths (sublayers, references, payloads) in a single USD layer file in one operation. **Edits the file in-place.** Use `usd_read_composition_arcs` first to inspect existing anchor strings.

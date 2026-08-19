@@ -23,6 +23,7 @@ from usd_tools import (
     read_prim_attributes,
     read_asset_paths,
     read_layer_dependencies,
+    read_render_settings,
     read_attribute_value,
     remove_sublayers,
     write_layer_metadata,
@@ -49,6 +50,7 @@ def register(mcp: MCPServer) -> None:
     mcp.tool()(usd_read_attribute_value)
     mcp.tool()(usd_read_asset_paths)
     mcp.tool()(usd_read_layer_dependencies)
+    mcp.tool()(usd_read_render_settings)
     mcp.tool()(usd_write_layer_metadata)
     mcp.tool()(usd_create_expressions_layer)
     mcp.tool()(usd_replace_anchors)
@@ -163,6 +165,17 @@ def usd_read_layer_dependencies(
     """List every USD layer a scene depends on, following sublayers, references and payloads transitively. Use this to answer 'which files does this shot need' — for packaging, transfer, or auditing broken paths. Each record gives the authored asset_path, the absolute resolved_path, a resolved state ('ok', 'missing', 'uri', 'expression'), its depth, and introduced_by: the layer that declares it, which is where a broken path has to be fixed. A resolver URI or an unexpanded expression variable reports resolved_path null and is not recursed into. Differs from usd_read_composition_arcs, which reads only what a single layer declares, grouped by arc type."""
     try:
         return read_layer_dependencies(path, limit=limit)
+    except (FileNotFoundError, UsdOpenError) as e:
+        raise _usd_error(e) from e
+
+
+def usd_read_render_settings(
+    path: Annotated[str, Field(min_length=1, description="Absolute path to a USD file")],
+    load_payloads: Annotated[bool, Field(description="Load USD payloads. Required if the render prims are defined inside a payload. Default: false.")] = False,
+) -> dict:
+    """Find the RenderSettings and RenderProduct prims in a USD scene and report what a render driven by each would actually use: resolution, camera, product names and paths, AOVs (RenderVars), and any renderer-specific settings such as karma:global:* that the scene authored. Each attribute says where its value came from — 'authored' on the prim, 'inherited' from the RenderSettings that targets the product, or 'fallback' meaning the schema default rather than scene data. That distinction matters because USD does not resolve the inheritance itself: an unauthored product resolution reads back as 2048x1080 regardless of its settings. Products are nested under the settings targeting them; products nothing targets appear in orphan_products. Payloads are not loaded by default, so render prims defined inside one are absent unless load_payloads is set."""
+    try:
+        return read_render_settings(path, load_payloads=load_payloads)
     except (FileNotFoundError, UsdOpenError) as e:
         raise _usd_error(e) from e
 
