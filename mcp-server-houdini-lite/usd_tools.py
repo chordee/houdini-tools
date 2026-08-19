@@ -11,6 +11,8 @@ Read-only functions for inspecting USD files without loading geometry:
   read_cameras              — all Camera prims with lens/projection attributes
   read_prim_attributes      — attribute names/types/time-sample info on a prim
   read_attribute_value      — value of a single named attribute on a prim
+  read_render_settings      — RenderSettings / RenderProduct prims and what a
+                               render driven by each would actually use
   read_layer_dependencies   — every layer the scene needs, walked transitively
   read_asset_paths          — every asset-valued attribute on a composed stage
                                (textures, light HDRIs, VDB caches), with the
@@ -663,6 +665,213 @@ def read_cameras(path: str, frame: float | None = None) -> dict:
         "frame":        frame,
         "camera_count": len(cameras),
         "cameras":      cameras,
+    }
+
+
+def _render_base_attribute_names() -> tuple[str, ...]:
+    """The attributes a RenderProduct takes from the RenderSettings targeting it.
+
+    Derived from the schema rather than written out here: the inheritable set is
+    exactly what the two prim types have in common, so a USD release that adds
+    or retires one stays correct without an edit. camera is excluded because a
+    relationship needs its targets resolved, not its value read.
+    """
+    registry = Usd.SchemaRegistry()
+    settings = set(registry.FindConcretePrimDefinition("RenderSettings").GetPropertyNames())
+    product = set(registry.FindConcretePrimDefinition("RenderProduct").GetPropertyNames())
+    return tuple(sorted((settings & product) - {"camera"}))
+
+
+def _attribute_record(prim, name: str, inherit_from=None) -> dict | None:
+    """One attribute's value plus where that value came from.
+
+    The distinction is the reason this function exists. UsdRenderProduct does
+    not consult its RenderSettings, so an unauthored resolution reads back as
+    the schema fallback of 2048x1080 — a number that looks like a real setting
+    and is not one. Reporting the source makes the difference visible instead
+    of leaving the caller to assume.
+    """
+    attr = prim.GetAttribute(name)
+    if attr and attr.HasAuthoredValue():
+        return {"value": _value_to_json(attr.Get()), "source": "authored"}
+    if inherit_from is not None:
+        parent = inherit_from.GetAttribute(name)
+        if parent and parent.HasAuthoredValue():
+            return {"value": _value_to_json(parent.Get()), "source": "inherited"}
+    if not attr:
+        return None
+    return {"value": _value_to_json(attr.Get()), "source": "fallback"}
+
+
+def _render_attributes(prim, base_names: tuple[str, ...], inherit_from=None) -> dict:
+    """The base set unconditionally, plus everything else actually authored.
+
+    The base set is always present because its fallbacks are meaningful — they
+    are what the renderer will use. Everything else is reported only when
+    authored, which is what surfaces renderer-specific settings such as
+    karma:global:samplesperpixel without padding the result with schema
+    defaults nobody set.
+    """
+    attributes = {}
+    for name in base_names:
+        record = _attribute_record(prim, name, inherit_from)
+        if record is not None:
+            attributes[name] = record
+
+    for attr in prim.GetAttributes():
+        name = attr.GetName()
+        if name in attributes or not attr.HasAuthoredValue():
+            continue
+        attributes[name] = {"value": _value_to_json(attr.Get()), "source": "authored"}
+    return attributes
+
+
+def _relationship_target(prim, name: str) -> str | None:
+    rel = prim.GetRelationship(name)
+    if not rel:
+        return None
+    targets = rel.GetTargets()
+    return str(targets[0]) if targets else None
+
+
+def _read_render_var(prim) -> dict:
+    def _get(name):
+        attr = prim.GetAttribute(name)
+        return _value_to_json(attr.Get()) if attr else None
+
+    return {
+        "prim_path":   str(prim.GetPath()),
+        "data_type":   _get("dataType"),
+        "source_name": _get("sourceName"),
+        "source_type": _get("sourceType"),
+    }
+
+
+def _read_render_product(stage, prim, base_names, inherit_from=None) -> dict:
+    camera = _relationship_target(prim, "camera")
+    camera_source = "authored" if camera else None
+    if camera is None and inherit_from is not None:
+        camera = _relationship_target(inherit_from, "camera")
+        camera_source = "inherited" if camera else None
+
+    variables, missing_vars = [], []
+    rel = prim.GetRelationship("orderedVars")
+    for target in (rel.GetTargets() if rel else []):
+        var_prim = stage.GetPrimAtPath(target)
+        if var_prim:
+            variables.append(_read_render_var(var_prim))
+        else:
+            missing_vars.append(str(target))
+
+    product_name = prim.GetAttribute("productName")
+    product_type = prim.GetAttribute("productType")
+    return {
+        "prim_path":            str(prim.GetPath()),
+        "product_name":         _value_to_json(product_name.Get()) if product_name else None,
+        "product_type":         _value_to_json(product_type.Get()) if product_type else None,
+        "camera":               camera,
+        "camera_source":        camera_source,
+        "attributes":           _render_attributes(prim, base_names, inherit_from),
+        "vars":                 variables,
+        "missing_var_targets":  missing_vars,
+    }
+
+
+def read_render_settings(path: str) -> dict:
+    """
+    Find the RenderSettings and RenderProduct prims on a stage and report what
+    a render driven by each would actually use.
+
+    Products are nested under the settings that target them. That is not
+    presentation: a product's unauthored attributes come from the settings, so
+    the same product listed under two settings prims genuinely has two
+    resolutions, and a flat list would have to discard one of them. Products no
+    settings targets are listed separately, since they have nothing to inherit.
+
+    Args:
+        path — absolute path to a USD file
+
+    Returns a dict with keys:
+        path                          — input file path
+        default_render_settings_prim  — the stage's renderSettingsPrimPath
+                                        metadata, or null if unauthored
+        render_settings               — list of settings dicts (see below)
+        orphan_products               — products no settings targets, same shape
+                                        as a nested product
+
+    Each settings dict:
+        prim_path              — USD scene path
+        camera                 — first target of the camera relationship, or null
+        attributes             — name -> {value, source}, see below
+        products               — list of product dicts
+        missing_product_targets — targets of the products relationship that name
+                                 a prim that is not on the stage
+
+    Each product dict:
+        prim_path, product_name, product_type
+        camera / camera_source — resolved target and whether it came from the
+                                 product or the settings
+        attributes             — name -> {value, source}
+        vars                   — ordered RenderVar dicts (prim_path, data_type,
+                                 source_name, source_type)
+        missing_var_targets    — orderedVars targets that are not on the stage
+
+    `source` is one of:
+        authored  — set on this prim
+        inherited — set on the RenderSettings that targets this product
+        fallback  — neither; this is the schema default, not scene data
+
+    Raises:
+        FileNotFoundError  — file does not exist
+        UsdOpenError       — stage could not be opened
+    """
+    _assert_exists(path)
+    stage = _open_stage(path, load=Usd.Stage.LoadNone)
+    base_names = _render_base_attribute_names()
+
+    settings_prims = []
+    product_prims = {}
+    for prim in stage.TraverseAll():
+        type_name = prim.GetTypeName()
+        if type_name == "RenderSettings":
+            settings_prims.append(prim)
+        elif type_name == "RenderProduct":
+            product_prims[str(prim.GetPath())] = prim
+
+    claimed = set()
+    render_settings = []
+    for prim in settings_prims:
+        products, missing = [], []
+        rel = prim.GetRelationship("products")
+        for target in (rel.GetTargets() if rel else []):
+            key = str(target)
+            product_prim = product_prims.get(key) or stage.GetPrimAtPath(target)
+            if not product_prim:
+                missing.append(key)
+                continue
+            claimed.add(key)
+            products.append(_read_render_product(stage, product_prim, base_names, prim))
+
+        render_settings.append({
+            "prim_path":               str(prim.GetPath()),
+            "camera":                  _relationship_target(prim, "camera"),
+            "attributes":              _render_attributes(prim, base_names),
+            "products":                products,
+            "missing_product_targets": missing,
+        })
+
+    orphans = [
+        _read_render_product(stage, product_prims[key], base_names)
+        for key in sorted(product_prims)
+        if key not in claimed
+    ]
+
+    default_prim = stage.GetMetadata("renderSettingsPrimPath") or None
+    return {
+        "path":                         path,
+        "default_render_settings_prim": str(default_prim) if default_prim else None,
+        "render_settings":              render_settings,
+        "orphan_products":              orphans,
     }
 
 

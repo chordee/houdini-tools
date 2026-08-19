@@ -24,6 +24,7 @@ CONVERTED: list[str] = [
 ADDED: list[str] = [
     "usd_read_asset_paths",
     "usd_read_layer_dependencies",
+    "usd_read_render_settings",
 ]
 
 

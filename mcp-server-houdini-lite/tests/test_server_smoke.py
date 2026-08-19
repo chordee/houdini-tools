@@ -18,7 +18,11 @@ with open(BASELINE_PATH, encoding="utf-8") as f:
 # pre-migration server, so it can never contain them; listing them here keeps
 # the guard meaningful — an unlisted new tool, or a disappearing old one, still
 # fails — without pretending they were part of that snapshot.
-ADDED_TOOL_NAMES = {"usd_read_asset_paths", "usd_read_layer_dependencies"}
+ADDED_TOOL_NAMES = {
+    "usd_read_asset_paths",
+    "usd_read_layer_dependencies",
+    "usd_read_render_settings",
+}
 
 
 @pytest.mark.anyio
